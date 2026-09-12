@@ -1,0 +1,10 @@
+node_modules/
+build/
+.env
+.env.*
+!.env.example
+.casedock/
+*.log
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
