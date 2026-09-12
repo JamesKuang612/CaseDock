@@ -7,10 +7,16 @@ import './styles.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ConfigProvider locale={zhCN} theme={{ token: {
-      colorPrimary: '#22644b', borderRadius: 8,
-      fontFamily: 'Inter, "Segoe UI", "Microsoft YaHei", sans-serif',
-    } }}>
+    <ConfigProvider
+      locale={zhCN}
+      theme={{
+        token: {
+          colorPrimary: '#22644b',
+          borderRadius: 8,
+          fontFamily: 'Inter, "Segoe UI", "Microsoft YaHei", sans-serif',
+        },
+      }}
+    >
       <App />
     </ConfigProvider>
   </React.StrictMode>,

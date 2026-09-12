@@ -1,0 +1,24 @@
+# 可用当前本地工作台验证的示例用例；保存文件本身不代表已通过。
+schemaVersion: 1
+id: casedock-workbench
+title: 示例：CaseDock 工作台基本检查
+tags:
+  - example
+  - smoke
+preconditions:
+  - CaseDock 本地服务已启动，目标地址可访问
+steps:
+  - id: open-library
+    action: 打开目标地址，查看测试用例列表与服务状态
+    assertions:
+      - id: library-visible
+        expect: 页面显示“团队的测试资产”，本地状态为“服务已连接”，用例列表可以阅读
+        evidence:
+          - screenshot
+  - id: open-editor
+    action: 点击“新建用例”，查看编辑表单，检查后关闭且不保存
+    assertions:
+      - id: editor-visible
+        expect: 表单包含用例 ID、用例名称、操作要求和预期结果字段
+        evidence:
+          - screenshot
