@@ -15,7 +15,7 @@ const png = Buffer.from(
 );
 
 /** 为每个测试提供独立仓库，清理前校验目录位于测试专用范围内。 */
-async function fixture(t: TestContext, evidence: ('screenshot' | 'text')[] = ['screenshot']) {
+async function fixture(t: TestContext, evidence: 'screenshot'[] = ['screenshot']) {
   const base = resolve('.casedock/test-workspaces');
   await mkdir(base, { recursive: true });
   const root = await mkdtemp(join(base, 'case-'));
@@ -43,8 +43,8 @@ async function fixture(t: TestContext, evidence: ('screenshot' | 'text')[] = ['s
   const start = {
     caseId: 'login',
     expectedRevision: document.revision,
-    environment: 'test',
-    targetUrl: 'http://localhost:3000',
+    initialUrl: 'http://localhost:3000',
+    credentials: null,
     executor: {
       agent: 'test-agent',
       model: null,
@@ -92,6 +92,48 @@ test('用例校验拒绝重复 ID 和未知字段，坏文件不会阻断其他�
   const list = await store.listCases();
   assert.equal(list.cases.length, 1);
   assert.equal(list.errors.length, 1);
+});
+
+test('初始地址与共用测试账密按原值记录，并拒绝废弃的环境字段', async (t) => {
+  const { store, start } = await fixture(t);
+  const initialUrl = 'https://example.test/login';
+  const credentials = { account: 'tester@example.test', password: 'plain-password' };
+  const run = await store.startRun({ ...start, initialUrl, credentials });
+  assert.equal(run.initialUrl, initialUrl);
+  assert.deepEqual(run.credentials, credentials);
+  await assert.rejects(store.startRun({ ...start, environment: 'production' }), code('VALIDATION'));
+});
+
+test('历史运行只有 targetUrl 且没有账密时仍可读取', async (t) => {
+  const { root, store, start } = await fixture(t);
+  const run = await store.startRun(start);
+  const resultPath = join(root, `runs/${run.id}/result.json`);
+  const legacy = JSON.parse(await readFile(resultPath, 'utf8')) as Record<string, unknown>;
+  legacy.targetUrl = legacy.initialUrl;
+  delete legacy.initialUrl;
+  delete legacy.credentials;
+  await writeFile(resultPath, JSON.stringify(legacy, null, 2));
+
+  const loaded = await store.getRun(run.id);
+  assert.equal(loaded.targetUrl, start.initialUrl);
+  assert.equal(loaded.initialUrl, undefined);
+  assert.equal(loaded.credentials, undefined);
+});
+
+test('新运行只接受截图证据，不再创建文本附件', async (t) => {
+  const { root, store, start } = await fixture(t);
+  const run = await store.startRun(start);
+  await writeFile(join(root, '.casedock/inbox/observed.txt'), '页面文字');
+  await assert.rejects(
+    store.addArtifact({
+      runId: run.id,
+      stepId: 'submit',
+      assertionId: 'welcome',
+      kind: 'text',
+      source: '.casedock/inbox/observed.txt',
+    }),
+    code('VALIDATION'),
+  );
 });
 
 test('旧版本不能覆盖新版本，运行快照不随用例修改变化', async (t) => {
@@ -144,10 +186,14 @@ test('证据齐全时可通过，提交幂等且结束后不可修改', async (t
     store.recordStep({ ...input, observation: 'different' }),
     code('IDEMPOTENCY_CONFLICT'),
   );
-  assert.equal(
-    (await store.finishRun({ runId: run.id, status: 'completed', reason: '检查完成' })).verdict,
-    'passed',
-  );
+  const finished = await store.finishRun({
+    runId: run.id,
+    status: 'completed',
+    reason: '检查完成',
+    tokenUsage: { total: 1234, source: '测试宿主统计' },
+  });
+  assert.equal(finished.verdict, 'passed');
+  assert.deepEqual(finished.tokenUsage, { total: 1234, source: '测试宿主统计' });
   assert.equal((await store.recordStep(input)).steps.length, 1);
   await assert.rejects(
     store.recordStep({ ...input, requestId: 'new-request' }),
@@ -298,41 +344,24 @@ test('修改标题保留未变步骤注释，初始化重复运行不破坏忽�
   assert.equal(await readFile(join(root, '.gitignore'), 'utf8'), ignore);
 });
 
-test('HTTP API 拒绝外站、非法 Host 和无令牌写入；合法请求使用同一内核', async (t) => {
-  const { root, document, testCase } = await fixture(t);
+test('HTTP API 拒绝外站与修改请求，只提供资产读取', async (t) => {
+  const { root } = await fixture(t);
   const server = await createServer(root);
   t.after(() => server.close());
   assert.equal(
-    (await server.inject({ url: '/api/session', headers: { host: 'attacker.example' } }))
-      .statusCode,
+    (await server.inject({ url: '/api/cases', headers: { host: 'attacker.example' } })).statusCode,
     403,
   );
   assert.equal(
-    (await server.inject({ url: '/api/session', headers: { origin: 'https://attacker.example' } }))
+    (await server.inject({ url: '/api/cases', headers: { origin: 'https://attacker.example' } }))
       .statusCode,
     403,
   );
   assert.equal(
     (await server.inject({ method: 'POST', url: '/api/cases', payload: {} })).statusCode,
-    403,
+    405,
   );
-  const token = (await server.inject('/api/session')).json().token;
-  const result = await server.inject({
-    method: 'POST',
-    url: '/api/cases',
-    headers: { 'x-casedock-token': token },
-    payload: {
-      testCase: { ...testCase, title: '通过界面保存' },
-      expectedRevision: document.revision,
-    },
-  });
+  const result = await server.inject('/api/cases');
   assert.equal(result.statusCode, 200);
-  assert.equal(result.json().testCase.title, '通过界面保存');
-  const conflict = await server.inject({
-    method: 'POST',
-    url: '/api/cases',
-    headers: { 'x-casedock-token': token },
-    payload: { testCase, expectedRevision: document.revision },
-  });
-  assert.equal(conflict.statusCode, 409);
+  assert.equal(result.json().cases.length, 1);
 });

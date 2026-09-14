@@ -14,15 +14,16 @@ import type {
 const text = { type: 'string', minLength: 1, maxLength: 10000, pattern: '\\S' };
 const id = { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{0,79}$' };
 const hash = { type: 'string', pattern: '^[a-f0-9]{64}$' };
-const evidence = { type: 'string', enum: ['screenshot', 'text'] };
+const screenshotEvidence = { type: 'string', enum: ['screenshot'] };
+const legacyEvidence = { type: 'string', enum: ['screenshot', 'text'] };
 const verdict = { type: 'string', enum: ['passed', 'failed', 'inconclusive'] };
 
-/** 创建禁止额外字段的对象 Schema，让拼错字段立即报错。 */
-function object(properties: Record<string, unknown>) {
+/** 创建禁止额外字段的对象 Schema，让拼错字段立即报错；兼容字段可标记为可选。 */
+function object(properties: Record<string, unknown>, optional: string[] = []) {
   return {
     type: 'object',
     properties,
-    required: Object.keys(properties),
+    required: Object.keys(properties).filter((key) => !optional.includes(key)),
     additionalProperties: false,
   };
 }
@@ -30,30 +31,43 @@ function object(properties: Record<string, unknown>) {
 function array(items: unknown, minItems = 0, maxItems = 1000) {
   return { type: 'array', items, minItems, maxItems };
 }
-export const caseSchema = object({
-  schemaVersion: { const: 1 },
-  id,
-  title: text,
-  tags: { ...array(text), uniqueItems: true },
-  preconditions: array(text),
-  steps: array(
-    object({
-      id,
-      action: text,
-      assertions: array(
-        object({ id, expect: text, evidence: { ...array(evidence), uniqueItems: true } }),
-        1,
-      ),
-    }),
-    1,
-  ),
-});
-const executor = object({
-  agent: text,
-  model: { anyOf: [text, { type: 'null' }] },
-  browserTool: text,
-  capabilities: { ...array(evidence), uniqueItems: true },
-});
+/** 创建用例 Schema；历史 Run 可读取早期版本生成的文本证据声明。 */
+function testCaseSchema(evidence: unknown) {
+  return object({
+    schemaVersion: { const: 1 },
+    id,
+    title: text,
+    tags: { ...array(text), uniqueItems: true },
+    preconditions: array(text),
+    steps: array(
+      object({
+        id,
+        action: text,
+        assertions: array(
+          object({ id, expect: text, evidence: { ...array(evidence), uniqueItems: true } }),
+          1,
+        ),
+      }),
+      1,
+    ),
+  });
+}
+export const caseSchema = testCaseSchema(screenshotEvidence);
+const legacyCaseSchema = testCaseSchema(legacyEvidence);
+/** 创建执行器 Schema；历史 Run 保留早期文本能力标记。 */
+function executorSchema(evidence: unknown) {
+  return object({
+    agent: text,
+    model: { anyOf: [text, { type: 'null' }] },
+    browserTool: text,
+    capabilities: { ...array(evidence), uniqueItems: true },
+  });
+}
+const executor = executorSchema(screenshotEvidence);
+const legacyExecutor = executorSchema(legacyEvidence);
+const credentials = {
+  anyOf: [object({ account: text, password: text }), { type: 'null' }],
+};
 const preconditions = array(
   object({
     index: { type: 'integer', minimum: 0 },
@@ -78,7 +92,7 @@ const artifactProperties = {
   id,
   stepId: id,
   assertionId: id,
-  kind: evidence,
+  kind: legacyEvidence,
   path: text,
   sha256: hash,
   bytes: { type: 'integer', minimum: 1, maximum: 20 * 1024 * 1024 },
@@ -92,37 +106,61 @@ export const schemas = {
   startRun: object({
     caseId: id,
     expectedRevision: hash,
-    environment: text,
-    targetUrl: text,
+    initialUrl: text,
+    credentials,
     executor,
     preconditions,
   }),
   recordStep: object({ runId: id, requestId: id, ...stepProperties }),
-  addArtifact: object({ runId: id, stepId: id, assertionId: id, kind: evidence, source: text }),
-  finishRun: object({ runId: id, status: { enum: ['completed', 'interrupted'] }, reason: text }),
-  run: object({
-    schemaVersion: { const: 1 },
-    id,
-    caseId: id,
-    caseRevision: hash,
-    snapshot: caseSchema,
-    environment: text,
-    targetUrl: text,
-    executor,
-    preconditions,
-    git: object({
-      commit: { anyOf: [text, { type: 'null' }] },
-      dirty: { type: ['boolean', 'null'] },
-    }),
-    startedAt: text,
-    finishedAt: { type: ['string', 'null'] },
-    status: { enum: ['running', 'completed', 'interrupted'] },
-    verdict: { anyOf: [verdict, { type: 'null' }] },
-    reason: { type: ['string', 'null'] },
-    steps: array(object(stepProperties)),
-    artifacts: array(object(artifactProperties)),
-    receipts: array(object({ requestId: id, digest: hash })),
+  addArtifact: object({
+    runId: id,
+    stepId: id,
+    assertionId: id,
+    kind: screenshotEvidence,
+    source: text,
   }),
+  finishRun: object(
+    {
+      runId: id,
+      status: { enum: ['completed', 'interrupted'] },
+      reason: text,
+      tokenUsage: {
+        anyOf: [object({ total: { type: 'integer', minimum: 0 }, source: text }), { type: 'null' }],
+      },
+    },
+    ['tokenUsage'],
+  ),
+  run: object(
+    {
+      schemaVersion: { const: 1 },
+      id,
+      caseId: id,
+      caseRevision: hash,
+      snapshot: legacyCaseSchema,
+      environment: text,
+      initialUrl: text,
+      targetUrl: text,
+      credentials,
+      executor: legacyExecutor,
+      preconditions,
+      git: object({
+        commit: { anyOf: [text, { type: 'null' }] },
+        dirty: { type: ['boolean', 'null'] },
+      }),
+      startedAt: text,
+      finishedAt: { type: ['string', 'null'] },
+      status: { enum: ['running', 'completed', 'interrupted'] },
+      verdict: { anyOf: [verdict, { type: 'null' }] },
+      reason: { type: ['string', 'null'] },
+      tokenUsage: {
+        anyOf: [object({ total: { type: 'integer', minimum: 0 }, source: text }), { type: 'null' }],
+      },
+      steps: array(object(stepProperties)),
+      artifacts: array(object(artifactProperties)),
+      receipts: array(object({ requestId: id, digest: hash })),
+    },
+    ['environment', 'initialUrl', 'targetUrl', 'credentials', 'tokenUsage'],
+  ),
 };
 interface Inputs {
   workspace: WorkspaceConfig;
@@ -137,7 +175,7 @@ interface Inputs {
 const ajv = new Ajv({ allErrors: true });
 const validators = new Map<string, ValidateFunction>();
 
-/** 使用稳定错误码携带可直接展示给 Agent 和编辑器的诊断。 */
+/** 使用稳定错误码携带可直接展示给 Agent 和本地页面的诊断。 */
 export class CoreError extends Error {
   /** 初始化错误码和可读说明，不泄露底层系统路径或堆栈。 */
   constructor(
@@ -161,6 +199,12 @@ export function validate<K extends keyof Inputs>(name: K, input: unknown): Input
 /** 验证用例内稳定 ID 的唯一性，防止结果关联到错误步骤。 */
 export function validateCase(input: unknown): TestCase {
   const value = validate('testCase', input);
+  validateCaseIdentity(value);
+  return value;
+}
+
+/** 只验证历史快照中的稳定 ID，不对旧证据类型应用新用例规则。 */
+export function validateCaseIdentity(value: TestCase) {
   const ids = new Set<string>();
   for (const step of value.steps) {
     for (const key of [step.id, ...step.assertions.map((assertion) => assertion.id)]) {
@@ -168,5 +212,4 @@ export function validateCase(input: unknown): TestCase {
       ids.add(key);
     }
   }
-  return value;
 }

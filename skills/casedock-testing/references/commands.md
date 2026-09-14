@@ -55,8 +55,11 @@ casedock validate --json
 {
   "caseId": "login-basic",
   "expectedRevision": "case get 返回的完整 revision",
-  "environment": "staging",
-  "targetUrl": "https://test.example",
+  "initialUrl": "https://test.example/login",
+  "credentials": {
+    "account": "qa@example.test",
+    "password": "test-password"
+  },
   "executor": {
     "agent": "实际 Agent 名称",
     "model": null,
@@ -69,7 +72,7 @@ casedock validate --json
 }
 ```
 
-前置条件为空时传空数组。目标 URL 必须为 HTTP(S) 且不能包含凭证。返回的 `data.id` 是 run ID；此命令只创建记录，不启动或控制浏览器。
+前置条件为空时传空数组。`initialUrl` 是用户最初提供、尚未发生页面跳转的 HTTP(S) 地址。测试账号与密码按用户提供的原值明文记录；不需要登录时 `credentials` 传 `null`。返回的 `data.id` 是 run ID；此命令只创建记录，不启动或控制浏览器。CaseDock 会自动记录开始时间。
 
 ## 证据和步骤结果
 
@@ -85,7 +88,7 @@ casedock validate --json
 }
 ```
 
-支持 PNG、JPEG 和 UTF-8 文本，单文件最多 20 MiB。登记后使用返回的 artifact ID 提交步骤：
+支持 PNG 和 JPEG，单文件最多 20 MiB。页面文本、URL 等内容直接写入 observation，不创建文本附件。登记后使用返回的 artifact ID 提交步骤：
 
 ```json
 {
@@ -110,7 +113,12 @@ casedock validate --json
 ## 结束和查看
 
 ```json
-{ "runId": "run-id", "status": "completed", "reason": "全部检查完成" }
+{
+  "runId": "run-id",
+  "status": "completed",
+  "reason": "全部检查完成",
+  "tokenUsage": { "total": 12345, "source": "宿主显示的本次任务用量" }
+}
 ```
 
-通过 `run finish --input <文件>` 提交；中断时将状态改为 `interrupted` 并说明原因。使用 `run list`、`run get <run-id>` 查看记录，使用 `casedock open` 打开本地编辑器。禁止手改 `runs/*/result.json`。
+通过 `run finish --input <文件>` 提交；CaseDock 根据开始和结束时间计算测试耗时。只有宿主明确提供本次测试的准确 Token 数量时才提交 `tokenUsage`，无法取得时省略，禁止估算。中断时将状态改为 `interrupted` 并说明原因。使用 `run list`、`run get <run-id>` 查看记录，使用 `casedock open` 打开本地页面。禁止手改 `runs/*/result.json`。

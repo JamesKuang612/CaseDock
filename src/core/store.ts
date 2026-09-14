@@ -4,7 +4,7 @@ import { mkdir, readdir, realpath } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { parseDocument, stringify } from 'yaml';
 import type { Artifact, CaseDocument, Run, RunSummary, WorkspaceConfig } from './models.js';
-import { CoreError, validate, validateCase } from './schema.js';
+import { CoreError, validate, validateCase, validateCaseIdentity } from './schema.js';
 import {
   atomicWrite,
   canonical,
@@ -46,12 +46,12 @@ export async function createStore(root: string) {
   return new Store(await realpath(root));
 }
 
-/** 为 CLI 与编辑器提供相同的数据读写、版本检查和结果汇总规则。 */
+/** 为 CLI 与只读页面提供统一的数据读取、写入、版本检查和结果汇总规则。 */
 export class Store {
   /** 将实例绑定到工作区，不持有可过期的用例或运行内存副本。 */
   constructor(public readonly root: string) {}
 
-  /** 读取资产库名称和格式版本，供 Agent 与本地编辑器确认当前目标目录。 */
+  /** 读取资产库名称和格式版本，供 Agent 与本地页面确认当前目标目录。 */
   async getWorkspace(): Promise<WorkspaceConfig & { root: string }> {
     const content = await optionalText(await safePath(this.root, 'casedock.yaml'));
     if (content === null)
@@ -147,12 +147,12 @@ export class Store {
     const value = validate('startRun', input);
     let url: URL;
     try {
-      url = new URL(value.targetUrl);
+      url = new URL(value.initialUrl);
     } catch {
-      throw new CoreError('VALIDATION', '目标地址必须是有效 HTTP(S) URL');
+      throw new CoreError('VALIDATION', '初始地址必须是有效 HTTP(S) URL');
     }
-    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password)
-      throw new CoreError('VALIDATION', '目标地址必须为 HTTP(S)，且不能嵌入凭证');
+    if (!['http:', 'https:'].includes(url.protocol))
+      throw new CoreError('VALIDATION', '初始地址必须为 HTTP(S)');
     return withWriteLock(this.root, async () => {
       const doc = await this.getCase(value.caseId);
       if (doc.revision !== value.expectedRevision)
@@ -171,8 +171,8 @@ export class Store {
         caseId: value.caseId,
         caseRevision: doc.revision,
         snapshot: doc.testCase,
-        environment: value.environment,
-        targetUrl: value.targetUrl,
+        initialUrl: value.initialUrl,
+        credentials: value.credentials,
         executor: value.executor,
         preconditions: value.preconditions,
         git: gitContext(this.root),
@@ -181,6 +181,7 @@ export class Store {
         status: 'running',
         verdict: null,
         reason: null,
+        tokenUsage: null,
         steps: [],
         artifacts: [],
         receipts: [],
@@ -202,7 +203,9 @@ export class Store {
       const run = validate('run', JSON.parse(bytes.toString('utf8')));
       if (run.id !== id || run.snapshot.id !== run.caseId)
         throw new CoreError('VALIDATION', '运行记录身份不一致');
-      validateCase(run.snapshot);
+      if (!run.initialUrl && !run.targetUrl)
+        throw new CoreError('VALIDATION', '运行记录缺少初始地址');
+      validateCaseIdentity(run.snapshot);
       return run;
     } catch (error) {
       if (isFsError(error, 'ENOENT')) throw new CoreError('NOT_FOUND', `找不到运行 ${id}`);
@@ -217,8 +220,28 @@ export class Store {
     for (const name of await this.names('runs', '')) {
       try {
         const run = await this.getRun(name);
-        const { id, caseId, caseRevision, environment, status, verdict, startedAt, executor } = run;
-        runs.push({ id, caseId, caseRevision, environment, status, verdict, startedAt, executor });
+        const {
+          id,
+          caseId,
+          caseRevision,
+          status,
+          verdict,
+          startedAt,
+          finishedAt,
+          tokenUsage,
+          executor,
+        } = run;
+        runs.push({
+          id,
+          caseId,
+          caseRevision,
+          status,
+          verdict,
+          startedAt,
+          finishedAt,
+          tokenUsage,
+          executor,
+        });
       } catch (error) {
         errors.push({
           path: name,
@@ -255,23 +278,15 @@ export class Store {
         throw new CoreError('VALIDATION', '证据必须关联快照中的步骤和断言');
       const bytes = await readBounded(await safePath(this.root, value.source), 20 * 1024 * 1024);
       if (!bytes.length) throw new CoreError('VALIDATION', '不能登记空证据');
-      let extension = 'txt';
-      let mime = 'text/plain; charset=utf-8';
-      if (value.kind === 'screenshot') {
-        if (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
-          extension = 'png';
-          mime = 'image/png';
-        } else if (bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) {
-          extension = 'jpg';
-          mime = 'image/jpeg';
-        } else throw new CoreError('VALIDATION', '截图只接受 PNG 或 JPEG 文件');
-      } else {
-        try {
-          new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-        } catch {
-          throw new CoreError('VALIDATION', '文本证据必须使用 UTF-8 编码');
-        }
-      }
+      let extension: 'png' | 'jpg';
+      let mime: 'image/png' | 'image/jpeg';
+      if (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+        extension = 'png';
+        mime = 'image/png';
+      } else if (bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) {
+        extension = 'jpg';
+        mime = 'image/jpeg';
+      } else throw new CoreError('VALIDATION', '截图只接受 PNG 或 JPEG 文件');
       const artifact: Artifact = {
         id: `artifact-${randomUUID()}`,
         stepId: value.stepId,
@@ -372,7 +387,14 @@ export class Store {
     const value = validate('finishRun', input);
     return withWriteLock(this.root, async () => {
       const run = await this.getRun(value.runId);
-      if (run.status === value.status && run.reason === value.reason) return run;
+      const suppliedUsage = Object.prototype.hasOwnProperty.call(value, 'tokenUsage');
+      if (
+        run.status === value.status &&
+        run.reason === value.reason &&
+        (!suppliedUsage ||
+          canonical(run.tokenUsage ?? null) === canonical(value.tokenUsage ?? null))
+      )
+        return run;
       this.requireRunning(run);
       // 完成前重新校验证据，避免记录后附件被删除却仍然汇总为通过。
       if (value.status === 'completed') {
@@ -397,6 +419,7 @@ export class Store {
               ? 'passed'
               : 'inconclusive';
       run.reason = value.reason;
+      run.tokenUsage = value.tokenUsage ?? null;
       run.finishedAt = new Date().toISOString();
       await this.writeRun(run);
       return run;

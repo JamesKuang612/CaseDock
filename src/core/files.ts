@@ -77,7 +77,7 @@ export async function atomicWrite(path: string, data: string | Buffer) {
   }
 }
 
-/** 在工作区级互斥锁内修改状态，防止 CLI 与编辑器丢失并发写入。 */
+/** 在工作区级互斥锁内修改状态，防止多个 Agent 或 CLI 丢失并发写入。 */
 export async function withWriteLock<T>(root: string, work: () => Promise<T>): Promise<T> {
   const directory = await safePath(root, '.casedock');
   await mkdir(directory, { recursive: true });

@@ -4,7 +4,12 @@ import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve, relative } from 'node:path';
 
-test('CLI 通过 stdin 串联创建、执行记录、文本证据和结束，失败返回机器错误', async (t) => {
+const png = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=',
+  'base64',
+);
+
+test('CLI 通过 stdin 串联创建、执行记录、截图证据和结束，失败返回机器错误', async (t) => {
   const base = resolve('.casedock/cli-tests');
   await mkdir(base, { recursive: true });
   const root = await mkdtemp(join(base, 'case-'));
@@ -55,8 +60,8 @@ test('CLI 通过 stdin 串联创建、执行记录、文本证据和结束，失
       steps: [
         {
           id: 'step',
-          action: '检查模拟文本',
-          assertions: [{ id: 'assertion', expect: '有测试文本', evidence: ['text'] }],
+          action: '检查模拟页面',
+          assertions: [{ id: 'assertion', expect: '页面状态正确', evidence: ['screenshot'] }],
         },
       ],
     },
@@ -64,21 +69,23 @@ test('CLI 通过 stdin 串联创建、执行记录、文本证据和结束，失
   const run = call(['run', 'start'], {
     caseId: 'cli-smoke',
     expectedRevision: document.revision,
-    environment: 'fixture',
-    targetUrl: 'http://localhost:3000',
-    executor: { agent: 'cli-test', model: null, browserTool: 'fixture', capabilities: ['text'] },
+    initialUrl: 'http://localhost:3000',
+    credentials: null,
+    executor: {
+      agent: 'cli-test',
+      model: null,
+      browserTool: 'fixture',
+      capabilities: ['screenshot'],
+    },
     preconditions: [],
   });
-  await writeFile(
-    join(root, '.casedock/inbox/observed.txt'),
-    '这是 CLI 集成测试的模拟文本证据，不是浏览器测试结果',
-  );
+  await writeFile(join(root, '.casedock/inbox/observed.png'), png);
   const artifact = call(['artifact', 'add'], {
     runId: run.id,
     stepId: 'step',
     assertionId: 'assertion',
-    kind: 'text',
-    source: '.casedock/inbox/observed.txt',
+    kind: 'screenshot',
+    source: '.casedock/inbox/observed.png',
   });
   call(['run', 'record'], {
     runId: run.id,
@@ -90,7 +97,7 @@ test('CLI 通过 stdin 串联创建、执行记录、文本证据和结束，失
       {
         assertionId: 'assertion',
         verdict: 'passed',
-        observation: '文本存在',
+        observation: '页面截图已保存',
         artifactIds: [artifact.id],
       },
     ],

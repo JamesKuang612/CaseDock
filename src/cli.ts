@@ -62,7 +62,7 @@ async function store() {
 cli
   .command('open [path]')
   .alias('app')
-  .description('打开指定测试资产库的本地编辑器')
+  .description('打开指定测试资产库的本地查看页面')
   .option('-p, --port <number>', '本地端口；省略时自动选择空闲端口', parsePort, 0)
   .option('--no-open', '不自动打开浏览器')
   .option('--dev', '允许 Vite 开发页面访问')
@@ -179,7 +179,7 @@ runs
   .action(async (options) => output(await (await store()).finishRun(await readInput(options))));
 cli
   .command('artifact')
-  .description('登记截图和文本证据')
+  .description('登记截图证据')
   .command('add')
   .requiredOption('--input <path>', 'JSON 文件或 -')
   .action(async (options) => output(await (await store()).addArtifact(await readInput(options))));

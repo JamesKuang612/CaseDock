@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,9 +9,8 @@ import { CoreError, schemas } from '../core/schema.js';
 /** 创建本地 API 和静态页面服务；所有业务写入委托给共享内核。 */
 export async function createServer(root = process.cwd(), development = false, staticRoot?: string) {
   const store = await createStore(root);
-  const token = randomBytes(32).toString('hex');
   const server = Fastify({ logger: false, bodyLimit: 1024 * 1024 });
-  // 限制 Host/Origin，写入需要页面取得的会话令牌，避免其他网页驱动本地文件写入。
+  // 本地 Web 只读取 Agent 生成的资产，不提供任何修改入口。
   server.addHook('onRequest', async (request, reply) => {
     const host = request.headers.host ?? '';
     if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host))
@@ -25,14 +23,10 @@ export async function createServer(root = process.cwd(), development = false, st
       return reply
         .code(403)
         .send({ ok: false, error: { code: 'ORIGIN', message: '请求来源不被允许' } });
-    if (
-      request.method !== 'GET' &&
-      request.method !== 'HEAD' &&
-      request.headers['x-casedock-token'] !== token
-    ) {
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
       return reply
-        .code(403)
-        .send({ ok: false, error: { code: 'TOKEN', message: '本地会话已失效，请刷新页面' } });
+        .code(405)
+        .send({ ok: false, error: { code: 'READ_ONLY', message: '本地页面仅用于查看测试资产' } });
     }
     reply.header('Cache-Control', 'no-store').header('X-Content-Type-Options', 'nosniff');
   });
@@ -56,22 +50,16 @@ export async function createServer(root = process.cwd(), development = false, st
     });
   });
   server.get('/api/health', async () => ({ ok: true, service: 'casedock' }));
-  server.get('/api/session', async () => ({ token }));
   server.get('/api/workspace', async () => store.getWorkspace());
   server.get('/api/schemas', async () => schemas);
   server.get('/api/cases', async () => store.listCases());
   server.get<{ Params: { id: string } }>('/api/cases/:id', async (request) =>
     store.getCase(request.params.id),
   );
-  server.post('/api/cases', async (request) => store.saveCase(request.body));
   server.get('/api/runs', async () => store.listRuns());
   server.get<{ Params: { id: string } }>('/api/runs/:id', async (request) =>
     store.getRun(request.params.id),
   );
-  server.post('/api/runs/start', async (request) => store.startRun(request.body));
-  server.post('/api/runs/record', async (request) => store.recordStep(request.body));
-  server.post('/api/runs/finish', async (request) => store.finishRun(request.body));
-  server.post('/api/artifacts', async (request) => store.addArtifact(request.body));
   server.get<{ Params: { runId: string; artifactId: string } }>(
     '/api/runs/:runId/artifacts/:artifactId',
     async (request, reply) => {

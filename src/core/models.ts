@@ -1,4 +1,5 @@
 export type EvidenceKind = 'screenshot' | 'text';
+export type RequiredEvidenceKind = 'screenshot';
 export type Verdict = 'passed' | 'failed' | 'inconclusive';
 export interface WorkspaceConfig {
   schemaVersion: 1;
@@ -7,7 +8,7 @@ export interface WorkspaceConfig {
 export interface Assertion {
   id: string;
   expect: string;
-  evidence: EvidenceKind[];
+  evidence: RequiredEvidenceKind[];
 }
 export interface TestStep {
   id: string;
@@ -34,13 +35,13 @@ export interface SaveCaseInput {
 export interface StartRunInput {
   caseId: string;
   expectedRevision: string;
-  environment: string;
-  targetUrl: string;
+  initialUrl: string;
+  credentials: { account: string; password: string } | null;
   executor: {
     agent: string;
     model: string | null;
     browserTool: string;
-    capabilities: EvidenceKind[];
+    capabilities: RequiredEvidenceKind[];
   };
   preconditions: { index: number; satisfied: boolean; observation: string }[];
 }
@@ -64,7 +65,7 @@ export interface ArtifactInput {
   runId: string;
   stepId: string;
   assertionId: string;
-  kind: EvidenceKind;
+  kind: RequiredEvidenceKind;
   source: string;
 }
 export interface Artifact {
@@ -82,6 +83,7 @@ export interface FinishInput {
   runId: string;
   status: 'completed' | 'interrupted';
   reason: string;
+  tokenUsage?: { total: number; source: string } | null;
 }
 export interface Run {
   schemaVersion: 1;
@@ -89,8 +91,10 @@ export interface Run {
   caseId: string;
   caseRevision: string;
   snapshot: TestCase;
-  environment: string;
-  targetUrl: string;
+  environment?: string;
+  initialUrl?: string;
+  targetUrl?: string;
+  credentials?: StartRunInput['credentials'];
   executor: StartRunInput['executor'];
   preconditions: StartRunInput['preconditions'];
   git: { commit: string | null; dirty: boolean | null };
@@ -99,11 +103,20 @@ export interface Run {
   status: 'running' | 'completed' | 'interrupted';
   verdict: Verdict | null;
   reason: string | null;
+  tokenUsage?: { total: number; source: string } | null;
   steps: StepResult[];
   artifacts: Artifact[];
   receipts: { requestId: string; digest: string }[];
 }
 export type RunSummary = Pick<
   Run,
-  'id' | 'caseId' | 'caseRevision' | 'environment' | 'status' | 'verdict' | 'startedAt' | 'executor'
+  | 'id'
+  | 'caseId'
+  | 'caseRevision'
+  | 'status'
+  | 'verdict'
+  | 'startedAt'
+  | 'finishedAt'
+  | 'tokenUsage'
+  | 'executor'
 >;

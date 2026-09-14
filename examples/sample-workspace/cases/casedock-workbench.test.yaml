@@ -1,24 +1,24 @@
-# 用于演示本地工作台；保存文件本身不代表已通过。
+# 用于演示只读页面；保存文件本身不代表已通过。
 schemaVersion: 1
 id: casedock-workbench
-title: 示例：CaseDock 工作台基本检查
+title: 示例：CaseDock 测试资产查看
 tags:
   - example
   - smoke
 preconditions:
-  - CaseDock 本地服务已启动，目标地址可访问
+  - CaseDock 本地查看页面已启动，初始地址可访问
 steps:
   - id: open-library
-    action: 打开目标地址，查看测试用例列表与服务状态
+    action: 打开初始地址，查看测试用例列表
     assertions:
       - id: library-visible
-        expect: 页面显示“团队的测试资产”，本地状态为“服务已连接”，用例列表可以阅读
+        expect: 页面显示“测试用例”，并列出用例名称和执行概况
         evidence:
           - screenshot
-  - id: open-editor
-    action: 点击“新建用例”，查看编辑表单，检查后关闭且不保存
+  - id: open-details
+    action: 点击一个测试用例进入详情页
     assertions:
-      - id: editor-visible
-        expect: 表单包含用例 ID、用例名称、操作要求和预期结果字段
+      - id: details-visible
+        expect: 页面显示用例内容、执行记录、执行详情和截图证据
         evidence:
           - screenshot
