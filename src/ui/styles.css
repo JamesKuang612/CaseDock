@@ -139,6 +139,32 @@ small {
   white-space: nowrap;
 }
 
+.case-name,
+.detail-title {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.case-id {
+  overflow: hidden;
+  color: #9aa39d;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-title {
+  flex-wrap: wrap;
+}
+
+.detail-title .case-id {
+  font-size: 12px;
+}
+
 .case-latest {
   align-items: flex-end;
 }
@@ -508,6 +534,13 @@ small {
   .detail-heading,
   .section-heading {
     align-items: flex-start;
+  }
+
+  .case-name,
+  .detail-title {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
   }
 
   .panel {

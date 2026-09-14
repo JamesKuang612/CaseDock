@@ -8,44 +8,40 @@
 
 ```text
 casedock --root <目录> init --name <名称>
-casedock case list --json
 casedock case get <case-id> --json
 casedock validate --json
 ```
 
 初始化生成 `casedock.yaml`、`cases/`、`runs/` 和临时 `.casedock/inbox/`。
+普通新测试不要调用 `case list` 或读取其他用例。只有用户明确要求浏览、统计或搜索资产库时才使用 `casedock case list --json`；用户明确指定 Case ID 重测时只读取该 ID。
 
-## 保存用例
+## 创建全新用例
 
-`case save --input <JSON文件>` 接受：
+`case create --input <JSON文件>` 接受不含 Case ID 的用例定义：
 
 ```json
 {
-  "expectedRevision": null,
-  "testCase": {
-    "schemaVersion": 1,
-    "id": "login-basic",
-    "title": "有效账号登录",
-    "tags": ["smoke"],
-    "preconditions": ["存在可用测试账号"],
-    "steps": [
-      {
-        "id": "submit-login",
-        "action": "打开登录页并使用测试账号登录",
-        "assertions": [
-          {
-            "id": "dashboard-visible",
-            "expect": "进入工作台并显示账号名称",
-            "evidence": ["screenshot"]
-          }
-        ]
-      }
-    ]
-  }
+  "schemaVersion": 1,
+  "title": "有效账号登录",
+  "tags": ["smoke"],
+  "preconditions": ["存在可用测试账号"],
+  "steps": [
+    {
+      "id": "submit-login",
+      "action": "打开登录页并使用测试账号登录",
+      "assertions": [
+        {
+          "id": "dashboard-visible",
+          "expect": "进入工作台并显示账号名称",
+          "evidence": ["screenshot"]
+        }
+      ]
+    }
+  ]
 }
 ```
 
-首次创建传 `null`；更新先 `case get`，将返回的完整 `revision` 作为 `expectedRevision`。冲突后重新读取并合并，不能强制覆盖。
+CaseDock 自动返回唯一 `data.testCase.id` 和 `data.revision`。每个新场景都单独调用一次；禁止自行指定 Case ID，禁止先查询相似用例。`case save` 只用于用户明确要求修改已有用例：先 `case get`，再携带完整用例和当前 `expectedRevision` 保存。
 
 ## 开始运行
 
@@ -53,8 +49,8 @@ casedock validate --json
 
 ```json
 {
-  "caseId": "login-basic",
-  "expectedRevision": "case get 返回的完整 revision",
+  "caseId": "case create 或 case get 返回的 ID",
+  "expectedRevision": "case create 或 case get 返回的完整 revision",
   "initialUrl": "https://test.example/login",
   "credentials": {
     "account": "qa@example.test",

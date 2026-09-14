@@ -94,6 +94,20 @@ test('用例校验拒绝重复 ID 和未知字段，坏文件不会阻断其他�
   assert.equal(list.errors.length, 1);
 });
 
+test('自动创建允许同名用例并生成互不重复的 Case ID', async (t) => {
+  const { store, testCase } = await fixture(t);
+  const { id: _id, ...definition } = testCase;
+  const first = await store.createCase(definition);
+  const second = await store.createCase(definition);
+
+  assert.match(first.testCase.id, /^case-[0-9a-f-]{36}$/);
+  assert.match(second.testCase.id, /^case-[0-9a-f-]{36}$/);
+  assert.notEqual(first.testCase.id, second.testCase.id);
+  assert.equal(first.testCase.title, second.testCase.title);
+  assert.equal((await store.listCases()).cases.length, 3);
+  await assert.rejects(store.createCase({ ...definition, id: 'agent-chosen' }), code('VALIDATION'));
+});
+
 test('初始地址与共用测试账密按原值记录，并拒绝废弃的环境字段', async (t) => {
   const { store, start } = await fixture(t);
   const initialUrl = 'https://example.test/login';

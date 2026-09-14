@@ -2,6 +2,7 @@ import { Ajv } from 'ajv';
 import type { ValidateFunction } from 'ajv';
 import type {
   ArtifactInput,
+  CreateCaseInput,
   FinishInput,
   RecordInput,
   Run,
@@ -31,11 +32,10 @@ function object(properties: Record<string, unknown>, optional: string[] = []) {
 function array(items: unknown, minItems = 0, maxItems = 1000) {
   return { type: 'array', items, minItems, maxItems };
 }
-/** 创建用例 Schema；历史 Run 可读取早期版本生成的文本证据声明。 */
-function testCaseSchema(evidence: unknown) {
-  return object({
+/** 创建用例主体字段，供自动创建输入与完整用例共用同一约束。 */
+function testCaseProperties(evidence: unknown) {
+  return {
     schemaVersion: { const: 1 },
-    id,
     title: text,
     tags: { ...array(text), uniqueItems: true },
     preconditions: array(text),
@@ -50,10 +50,10 @@ function testCaseSchema(evidence: unknown) {
       }),
       1,
     ),
-  });
+  };
 }
-export const caseSchema = testCaseSchema(screenshotEvidence);
-const legacyCaseSchema = testCaseSchema(legacyEvidence);
+export const caseSchema = object({ id, ...testCaseProperties(screenshotEvidence) });
+const legacyCaseSchema = object({ id, ...testCaseProperties(legacyEvidence) });
 /** 创建执行器 Schema；历史 Run 保留早期文本能力标记。 */
 function executorSchema(evidence: unknown) {
   return object({
@@ -102,6 +102,7 @@ const artifactProperties = {
 export const schemas = {
   workspace: object({ schemaVersion: { const: 1 }, name: text }),
   testCase: caseSchema,
+  createCase: object(testCaseProperties(screenshotEvidence)),
   saveCase: object({ testCase: caseSchema, expectedRevision: { anyOf: [hash, { type: 'null' }] } }),
   startRun: object({
     caseId: id,
@@ -165,6 +166,7 @@ export const schemas = {
 interface Inputs {
   workspace: WorkspaceConfig;
   testCase: TestCase;
+  createCase: CreateCaseInput;
   saveCase: SaveCaseInput;
   startRun: StartRunInput;
   recordStep: RecordInput;

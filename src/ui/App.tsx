@@ -152,7 +152,10 @@ export function App() {
                       onClick={() => openCase(document.testCase.id)}
                     >
                       <span className="case-title">
-                        <strong>{document.testCase.title}</strong>
+                        <span className="case-name">
+                          <strong>{document.testCase.title}</strong>
+                          <span className="case-id">{document.testCase.id}</span>
+                        </span>
                         <small>
                           {document.testCase.steps.length} 个步骤 · {assertionCount} 个检查点 ·{' '}
                           {relatedRuns.length} 次执行
@@ -187,7 +190,10 @@ export function App() {
               ← 返回测试用例
             </button>
             <div className="detail-heading">
-              <h1>{selectedCase.testCase.title}</h1>
+              <div className="detail-title">
+                <h1>{selectedCase.testCase.title}</h1>
+                <span className="case-id">{selectedCase.testCase.id}</span>
+              </div>
               <span>
                 {selectedCase.testCase.steps.length} 个步骤 · {caseRuns.length} 次执行
               </span>

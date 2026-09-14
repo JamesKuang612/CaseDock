@@ -145,6 +145,11 @@ cli
   });
 const cases = cli.command('case').description('读取和维护测试用例');
 cases
+  .command('create')
+  .description('创建具有自动唯一 ID 的全新用例')
+  .requiredOption('--input <path>', 'JSON 文件，- 表示 stdin')
+  .action(async (options) => output(await (await store()).createCase(await readInput(options))));
+cases
   .command('list')
   .option('--json')
   .action(async () => output(await (await store()).listCases()));

@@ -28,6 +28,7 @@ export interface CaseDocument {
   revision: string;
   path: string;
 }
+export type CreateCaseInput = Omit<TestCase, 'id'>;
 export interface SaveCaseInput {
   testCase: TestCase;
   expectedRevision: string | null;

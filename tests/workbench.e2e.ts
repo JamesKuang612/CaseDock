@@ -17,28 +17,24 @@ test('只读页面从用例列表进入详情并展示执行证据', async (t) =
   const root = await mkdtemp(join(base, 'case-'));
   const store = await createStore(root);
   await store.init();
-  const document = await store.saveCase({
-    expectedRevision: null,
-    testCase: {
-      schemaVersion: 1,
-      id: 'browser-smoke',
-      title: '工作台基本流程',
-      tags: [],
-      preconditions: ['服务已经启动'],
-      steps: [
-        {
-          id: 'step-1',
-          action: '打开工作台',
-          assertions: [
-            {
-              id: 'assert-1',
-              expect: '能够查看测试用例',
-              evidence: ['screenshot'],
-            },
-          ],
-        },
-      ],
-    },
+  const document = await store.createCase({
+    schemaVersion: 1,
+    title: '工作台基本流程',
+    tags: [],
+    preconditions: ['服务已经启动'],
+    steps: [
+      {
+        id: 'step-1',
+        action: '打开工作台',
+        assertions: [
+          {
+            id: 'assert-1',
+            expect: '能够查看测试用例',
+            evidence: ['screenshot'],
+          },
+        ],
+      },
+    ],
   });
   const run = await store.startRun({
     caseId: document.testCase.id,
@@ -104,6 +100,7 @@ test('只读页面从用例列表进入详情并展示执行证据', async (t) =
 
   await expect(page.getByRole('heading', { name: '测试用例' })).toBeVisible();
   await expect(page.getByRole('button', { name: /工作台基本流程/ })).toBeVisible();
+  await expect(page.getByText(document.testCase.id, { exact: true })).toBeVisible();
   await expect(page.getByText('1 个步骤 · 1 个检查点 · 1 次执行')).toBeVisible();
   await expect(page.getByText('YOUR TESTS. YOUR AGENT.')).toHaveCount(0);
   await expect(page.getByText('新建用例')).toHaveCount(0);
@@ -115,7 +112,10 @@ test('只读页面从用例列表进入详情并展示执行证据', async (t) =
   });
 
   await page.getByRole('button', { name: /工作台基本流程/ }).click();
-  await expect(page).toHaveURL(/#\/cases\/browser-smoke$/);
+  await expect(page).toHaveURL(
+    new RegExp(`#\/cases\/${document.testCase.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`),
+  );
+  await expect(page.getByText(document.testCase.id, { exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: '用例内容' })).toBeVisible();
   await expect(page.getByRole('listitem').filter({ hasText: '服务已经启动' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '执行详情' })).toBeVisible();

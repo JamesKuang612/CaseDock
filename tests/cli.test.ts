@@ -49,25 +49,22 @@ test('CLI 通过 stdin 串联创建、执行记录、截图证据和结束，失
     await readFile(join(root, '.agents/skills/casedock-testing/SKILL.md'), 'utf8'),
     /CaseDock 约束测试资产如何保存，不约束测试如何执行/,
   );
-  const document = call(['case', 'save'], {
-    expectedRevision: null,
-    testCase: {
-      schemaVersion: 1,
-      id: 'cli-smoke',
-      title: 'CLI 测试',
-      tags: [],
-      preconditions: [],
-      steps: [
-        {
-          id: 'step',
-          action: '检查模拟页面',
-          assertions: [{ id: 'assertion', expect: '页面状态正确', evidence: ['screenshot'] }],
-        },
-      ],
-    },
+  const document = call(['case', 'create'], {
+    schemaVersion: 1,
+    title: 'CLI 测试',
+    tags: [],
+    preconditions: [],
+    steps: [
+      {
+        id: 'step',
+        action: '检查模拟页面',
+        assertions: [{ id: 'assertion', expect: '页面状态正确', evidence: ['screenshot'] }],
+      },
+    ],
   });
+  assert.match(document.testCase.id, /^case-[0-9a-f-]{36}$/);
   const run = call(['run', 'start'], {
-    caseId: 'cli-smoke',
+    caseId: document.testCase.id,
     expectedRevision: document.revision,
     initialUrl: 'http://localhost:3000',
     credentials: null,
@@ -109,7 +106,7 @@ test('CLI 通过 stdin 串联创建、执行记录、截图证据和结束，失
   assert.equal(call(['run', 'get', run.id]).steps.length, 1);
   const invalid = spawnSync(
     process.execPath,
-    ['--import', 'tsx', 'src/cli.ts', '--root', root, 'case', 'save', '--input', '-'],
+    ['--import', 'tsx', 'src/cli.ts', '--root', root, 'case', 'create', '--input', '-'],
     { encoding: 'utf8', input: '{broken', windowsHide: true },
   );
   assert.equal(invalid.status, 1);

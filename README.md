@@ -75,7 +75,7 @@ casedock open
 
 > 使用 CaseDock 执行登录回归测试。你可以自由使用现有浏览器能力；请把结构化用例、每个业务步骤的观察、结论和截图证据保存到当前测试资产库，最后告诉我 run ID 和结果。
 
-Skill 会指导 Agent 查询或创建用例、在操作前冻结快照、逐步归档证据，并在结束或中断时保存最终状态。CLI 具体输入见 [接口参考](skills/casedock-testing/references/commands.md)。
+Skill 会指导 Agent 为每个新场景创建具有自动唯一 ID 的用例、在操作前冻结快照、逐步归档证据，并在结束或中断时保存最终状态。只有用户明确指定 Case ID 时才读取并重测已有用例。CLI 具体输入见 [接口参考](skills/casedock-testing/references/commands.md)。
 
 ## 资产目录
 
@@ -102,6 +102,7 @@ casedock init
 casedock skill install
 casedock schema --json
 casedock validate --json
+casedock case create --input <JSON文件>
 casedock case list --json
 casedock case get <id> --json
 casedock case save --input <JSON文件>

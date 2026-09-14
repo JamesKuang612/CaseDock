@@ -118,6 +118,27 @@ export class Store {
     return { cases, errors };
   }
 
+  /** 创建全新用例并由内核生成唯一 ID，不读取或匹配资产库中的其他用例。 */
+  async createCase(input: unknown): Promise<CaseDocument> {
+    const value = validate('createCase', input);
+    return withWriteLock(this.root, async () => {
+      let id: string;
+      let path: string;
+      // UUID 冲突几乎不可能，但仍以文件是否存在为最终唯一性依据。
+      do {
+        id = `case-${randomUUID()}`;
+        path = await safePath(this.root, `cases/${id}.test.yaml`);
+      } while ((await optionalText(path)) !== null);
+      const { schemaVersion, ...definition } = value;
+      const testCase = validateCase({ schemaVersion, id, ...definition });
+      const content = stringify(testCase);
+      if (Buffer.byteLength(content) > 4 * 1024 * 1024)
+        throw new CoreError('FILE_SIZE', '用例超过 4 MiB，请拆分成更小的用例');
+      await atomicWrite(path, content);
+      return this.getCase(id);
+    });
+  }
+
   /** 按预期版本保存用例；新建必须传 null，更新必须匹配当前 revision。 */
   async saveCase(input: unknown): Promise<CaseDocument> {
     const { testCase, expectedRevision } = validate('saveCase', input);
