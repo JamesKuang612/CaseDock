@@ -1,15 +1,27 @@
 {
-  "name": "@casedock/workbench",
-  "version": "0.1.0",
-  "private": true,
-  "description": "A local test asset workbench for the agent your team chooses.",
+  "name": "casedock",
+  "version": "0.1.0-beta.0",
+  "description": "跨 Agent 的本地测试资产与证据工作台",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JamesKuang612/CaseDock.git"
+  },
+  "homepage": "https://github.com/JamesKuang612/CaseDock#readme",
+  "bugs": {
+    "url": "https://github.com/JamesKuang612/CaseDock/issues"
+  },
+  "keywords": ["testing", "agent", "evidence", "test-cases", "local-first"],
   "type": "module",
   "bin": {
     "casedock": "build/cli.js"
   },
-  "files": ["build", "skills", "examples/sample-workspace", "README.md"],
+  "files": ["build", "skills", "examples/sample-workspace", "README.md", "LICENSE"],
   "engines": {
-    "node": ">=24"
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "dev": "concurrently -k -n api,ui \"npm:dev:api\" \"npm:dev:ui\"",

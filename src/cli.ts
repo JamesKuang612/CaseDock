@@ -9,6 +9,14 @@ import { createStore } from './core/store.js';
 import { CoreError, schemas } from './core/schema.js';
 import { findWorkspace, isFsError, readBounded, safePath } from './core/files.js';
 
+const defaultSkillTarget = '.agents/skills/casedock-testing';
+
+interface SkillInstallation {
+  source: string;
+  path: string;
+  status: 'installed' | 'existing';
+}
+
 /** 校验本地服务端口，防止把非法输入传入网络监听。 */
 function parsePort(value: string) {
   if (!/^\d+$/.test(value)) throw new InvalidArgumentError('端口必须是整数');
@@ -38,6 +46,53 @@ async function readInput(options: { input: string }): Promise<unknown> {
 /** 用稳定信封向 Agent 输出结果，业务命令不会向 stdout 混入日志。 */
 function output(data: unknown) {
   console.log(JSON.stringify({ apiVersion: 1, ok: true, data }, null, 2));
+}
+
+/** 安装随 npm 包分发的 Skill；setup 重复运行时保留用户已有版本。 */
+async function installBundledSkill(
+  root: string,
+  target: string,
+  preserveExisting = false,
+): Promise<SkillInstallation> {
+  const normalizedTarget = target.replace(/[\\/]+$/, '');
+  const source = fileURLToPath(new URL('../skills/casedock-testing/', import.meta.url));
+  const destination = await safePath(root, normalizedTarget);
+  if (preserveExisting) {
+    try {
+      await readBounded(await safePath(root, `${normalizedTarget}/SKILL.md`));
+      return { source, path: normalizedTarget, status: 'existing' };
+    } catch (error) {
+      if (!isFsError(error, 'ENOENT')) throw error;
+    }
+  }
+  try {
+    await cp(source, destination, { recursive: true, errorOnExist: true, force: false });
+  } catch (error) {
+    if (isFsError(error, 'EEXIST') || (error as NodeJS.ErrnoException).code === 'ERR_FS_CP_EEXIST')
+      throw new CoreError('CONFLICT', '目标 Skill 已存在；请先审阅并自行合并更新');
+    throw error;
+  }
+  return { source, path: normalizedTarget, status: 'installed' };
+}
+
+/** 输出面向首次使用者的 setup 结果和唯一必要的下一步操作。 */
+function outputSetup(
+  workspace: { root: string; casesDirectory: string; runsDirectory: string },
+  skillInstallation: SkillInstallation,
+) {
+  const skillStatus = skillInstallation.status === 'installed' ? '已安装' : '已存在，未覆盖';
+  console.log(
+    [
+      'CaseDock 测试资产库已准备完成',
+      '',
+      `资产目录：${workspace.root}`,
+      `Skill：${skillStatus}（${skillInstallation.path}）`,
+      `用例目录：${workspace.casesDirectory}/`,
+      `执行目录：${workspace.runsDirectory}/`,
+      '',
+      '现在可以在该目录打开 Agent，并要求它使用 CaseDock 执行测试。',
+    ].join('\n'),
+  );
 }
 
 const cli = new Command()
@@ -89,6 +144,18 @@ cli
     },
   );
 cli
+  .command('setup')
+  .description('一次完成测试资产库初始化和 Skill 安装')
+  .option('--name <name>', '资产库显示名称')
+  .option('--target <path>', '资产库内的 Skill 目标目录', defaultSkillTarget)
+  .action(async (options: { name?: string; target: string }) => {
+    const root = await workspaceRoot(true);
+    const repository = await createStore(root);
+    const workspace = await repository.init(options.name);
+    const installation = await installBundledSkill(root, options.target, true);
+    outputSetup(workspace, installation);
+  });
+cli
   .command('init')
   .description('将当前目录初始化为独立测试资产库')
   .option('--name <name>', '资产库显示名称')
@@ -100,22 +167,10 @@ const skill = cli.command('skill').description('安装或定位 CaseDock 测试�
 skill
   .command('install')
   .description('将 Skill 安装到当前资产库的开放 Agent Skills 目录')
-  .option('--target <path>', '资产库内的目标目录', '.agents/skills/casedock-testing')
+  .option('--target <path>', '资产库内的目标目录', defaultSkillTarget)
   .action(async (options: { target: string }) => {
     const root = await workspaceRoot();
-    const source = fileURLToPath(new URL('../skills/casedock-testing/', import.meta.url));
-    const destination = await safePath(root, options.target);
-    try {
-      await cp(source, destination, { recursive: true, errorOnExist: true, force: false });
-    } catch (error) {
-      if (
-        isFsError(error, 'EEXIST') ||
-        (error as NodeJS.ErrnoException).code === 'ERR_FS_CP_EEXIST'
-      )
-        throw new CoreError('CONFLICT', '目标 Skill 已存在；请先审阅并自行合并更新');
-      throw error;
-    }
-    output({ source, path: options.target });
+    output(await installBundledSkill(root, options.target));
   });
 skill
   .command('path')

@@ -38,7 +38,7 @@ Skill 是第一版产品入口，描述输出契约和必要的不变量。它�
 
 ### CLI
 
-CLI 是跨 Agent 的最低公共接口。Agent 可通过 shell 使用，用户无需理解内部运行生命周期。复杂输入支持 JSON 文件或 stdin，避免 shell 转义。
+CLI 是跨 Agent 的最低公共接口。Agent 可通过 shell 使用，用户无需理解内部运行生命周期。`setup` 为首次使用者组合资产库初始化和 Skill 安装，底层仍复用 Core 初始化规则；复杂输入支持 JSON 文件或 stdin，避免 shell 转义。
 
 ### HTTP 与本地查看页面
 

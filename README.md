@@ -29,7 +29,7 @@ CaseDock 不包含模型 SDK、Agent loop、浏览器执行引擎、定位器或
 
 ## 开发环境
 
-- Node.js 24 或更高版本
+- Node.js 22 或更高版本
 - npm 和 Git
 
 ```bash
@@ -37,34 +37,38 @@ npm ci
 npm run check
 ```
 
-## 使用独立资产目录体验 POC
+## 使用本地 npm 安装包体验 POC
 
-先构建 CaseDock：
+当前 beta 尚未发布到 npm Registry。先在源码目录生成真实安装包：
+
+```bash
+npm pack
+npm install --global ./casedock-0.1.0-beta.0.tgz
+```
+
+随后在 CaseDock 源码目录之外准备资产库：
+
+```bash
+mkdir <测试资产目录>
+cd <测试资产目录>
+casedock setup --name "团队回归测试"
+casedock open
+```
+
+`setup` 一次创建资产目录结构、`.gitignore` 并安装仓库级 Skill；重复执行不会覆盖已有 Skill。`open` 默认自动选择空闲端口、启动本地服务并打开浏览器。
+
+开发源码时也可以不安装本地包：
 
 ```bash
 npm run build
-```
-
-在 CaseDock 源码目录之外创建资产库：
-
-```bash
-node <CaseDock目录>/build/cli.js --root <测试资产目录> init --name "团队回归测试"
-node <CaseDock目录>/build/cli.js --root <测试资产目录> skill install
+node <CaseDock目录>/build/cli.js --root <测试资产目录> setup --name "团队回归测试"
 node <CaseDock目录>/build/cli.js --root <测试资产目录> open
 ```
 
-`open` 默认自动选择空闲端口、启动本地服务并打开浏览器。也可以进入资产目录后省略 `--root`：
+未来正式发布 npm beta 后，安装命令将简化为：
 
 ```bash
-cd <测试资产目录>
-node <CaseDock目录>/build/cli.js open
-```
-
-未来发布 npm 包后，用户只需：
-
-```bash
-cd <测试资产目录>
-casedock open
+npm install --global casedock@beta
 ```
 
 开发者可运行 `npm start` 打开 `examples/sample-workspace/` 示例资产库；`npm run dev` 使用 Vite 热更新页面。
@@ -98,6 +102,7 @@ runs/
 ## CLI
 
 ```bash
+casedock setup --name "团队回归测试"
 casedock init
 casedock skill install
 casedock schema --json
