@@ -8,6 +8,7 @@ import type {
   SaveCaseInput,
   StartRunInput,
   TestCase,
+  WorkspaceConfig,
 } from './models.js';
 
 const text = { type: 'string', minLength: 1, maxLength: 10000, pattern: '\\S' };
@@ -85,6 +86,7 @@ const artifactProperties = {
   mime: { enum: ['image/png', 'image/jpeg', 'text/plain; charset=utf-8'] },
 };
 export const schemas = {
+  workspace: object({ schemaVersion: { const: 1 }, name: text }),
   testCase: caseSchema,
   saveCase: object({ testCase: caseSchema, expectedRevision: { anyOf: [hash, { type: 'null' }] } }),
   startRun: object({
@@ -123,6 +125,7 @@ export const schemas = {
   }),
 };
 interface Inputs {
+  workspace: WorkspaceConfig;
   testCase: TestCase;
   saveCase: SaveCaseInput;
   startRun: StartRunInput;

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Drawer, Empty, Input, Modal, Table, Tag, message } from 'antd';
-import type { CaseDocument, Run, RunSummary } from '../core/models';
+import type { CaseDocument, Run, RunSummary, WorkspaceConfig } from '../core/models';
 import { api } from './api';
 import { CaseEditor } from './CaseEditor';
 import { RunDetails, label } from './RunDetails';
@@ -11,6 +11,7 @@ export function App() {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
   const [connected, setConnected] = useState(false);
+  const [workspace, setWorkspace] = useState<(WorkspaceConfig & { root: string }) | null>(null);
   const [tab, setTab] = useState<'cases' | 'runs'>('cases');
   const [query, setQuery] = useState('');
   const [editor, setEditor] = useState<{ document: CaseDocument | null } | null>(null);
@@ -22,10 +23,12 @@ export function App() {
   /** 刷新服务器列表及打开的运行详情，保留独立的用例编辑缓冲。 */
   const refresh = useCallback(async () => {
     try {
-      const [caseData, runData] = await Promise.all([
+      const [workspaceData, caseData, runData] = await Promise.all([
+        api<WorkspaceConfig & { root: string }>('/workspace'),
         api<{ cases: CaseDocument[]; errors: { path: string; message: string }[] }>('/cases'),
         api<{ runs: RunSummary[]; errors: { path: string; message: string }[] }>('/runs'),
       ]);
+      setWorkspace(workspaceData);
       setCases(caseData.cases);
       setRuns(runData.runs);
       setConnected(true);
@@ -132,7 +135,9 @@ export function App() {
       </aside>
       <main>
         <header>
-          <span>本地工作区 · Git 管理用例</span>
+          <span title={workspace?.root}>
+            {workspace?.name ?? '本地测试资产库'} · Git 管理用例与结果
+          </span>
           <Tag color={connected ? 'green' : 'orange'}>
             {connected ? '服务已连接' : '正在连接 / 服务不可用'}
           </Tag>
@@ -272,7 +277,8 @@ export function App() {
           />
         )}
         <p className="footnote">
-          用例保存在 cases/，运行和证据保存在 .casedock/。页面每 4 秒检查更新。
+          用例保存在 cases/，运行和最终证据保存在 runs/；.casedock/ 只保存临时文件。页面每 4
+          秒检查更新。
         </p>
       </main>
       <Drawer

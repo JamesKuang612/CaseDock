@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve, relative } from 'node:path';
 
 test('CLI 通过 stdin 串联创建、执行记录、文本证据和结束，失败返回机器错误', async (t) => {
@@ -39,6 +39,11 @@ test('CLI 通过 stdin 串联创建、执行记录、文本证据和结束，失
     return envelope.data;
   }
   call(['init']);
+  call(['skill', 'install']);
+  assert.match(
+    await readFile(join(root, '.agents/skills/casedock-testing/SKILL.md'), 'utf8'),
+    /CaseDock 约束测试资产如何保存，不约束测试如何执行/,
+  );
   const document = call(['case', 'save'], {
     expectedRevision: null,
     testCase: {

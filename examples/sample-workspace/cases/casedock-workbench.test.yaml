@@ -1,4 +1,4 @@
-# 可用当前本地工作台验证的示例用例；保存文件本身不代表已通过。
+# 用于演示本地工作台；保存文件本身不代表已通过。
 schemaVersion: 1
 id: casedock-workbench
 title: 示例：CaseDock 工作台基本检查

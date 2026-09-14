@@ -1,10 +1,23 @@
-# CLI 输入示例
+# CaseDock CLI 接口
 
-以下接口在源码仓库中通过 `node build/cli.js` 调用。其他工作区使用 `node <CaseDock目录>/build/cli.js --root <工作区> ...`。所有业务命令返回 `{apiVersion:1,ok:true,data:...}`；错误写 stderr 并返回非零退出码。输出结构以 `schema --json` 为准。
+仅在需要读写资产时阅读本页。已安装版本使用 `casedock`；在 CaseDock 源码仓库开发时使用 `node build/cli.js`。通过 `--root <目录>` 可显式指定资产库，否则 CLI 从当前目录向上寻找 `casedock.yaml`。
 
-## 创建用例
+复杂输入保存到资产库的 `.casedock/inbox/`，通过 `--input <文件>` 提交，也可以使用 `--input -` 从 stdin 读取 JSON。用 `casedock schema` 获取当前精确 Schema。
 
-运行 `init` 后，将以下结构写到 JSON 文件，再执行 `case save --input <文件>`：
+## 初始化和读取
+
+```text
+casedock --root <目录> init --name <名称>
+casedock case list --json
+casedock case get <case-id> --json
+casedock validate --json
+```
+
+初始化生成 `casedock.yaml`、`cases/`、`runs/` 和临时 `.casedock/inbox/`。
+
+## 保存用例
+
+`case save --input <JSON文件>` 接受：
 
 ```json
 {
@@ -15,71 +28,89 @@
     "title": "有效账号登录",
     "tags": ["smoke"],
     "preconditions": ["存在可用测试账号"],
-    "steps": [{
-      "id": "submit-login",
-      "action": "打开登录页，使用测试账号登录",
-      "assertions": [{"id":"dashboard-visible","expect":"进入工作台并显示账号名称","evidence":["screenshot"]}]
-    }]
+    "steps": [
+      {
+        "id": "submit-login",
+        "action": "打开登录页并使用测试账号登录",
+        "assertions": [
+          {
+            "id": "dashboard-visible",
+            "expect": "进入工作台并显示账号名称",
+            "evidence": ["screenshot"]
+          }
+        ]
+      }
+    ]
   }
 }
 ```
 
-更新使用 `case get login-basic` 返回的 revision；首次创建才传 null。文件保存到 `cases/<id>.test.yaml`，第一版用例目录为平铺结构。
+首次创建传 `null`；更新先 `case get`，将返回的完整 `revision` 作为 `expectedRevision`。冲突后重新读取并合并，不能强制覆盖。
 
 ## 开始运行
 
-`run start --input <文件>`：
+`run start --input <JSON文件>`：
 
 ```json
 {
   "caseId": "login-basic",
-  "expectedRevision": "替换为 case get 返回的完整 revision",
+  "expectedRevision": "case get 返回的完整 revision",
   "environment": "staging",
-  "targetUrl": "https://your-test-app.example",
-  "executor": {"agent":"实际 Agent 名称","model":null,"browserTool":"实际工具名称","capabilities":["screenshot"]},
-  "preconditions": [{"index":0,"satisfied":true,"observation":"填写真实观察依据"}]
+  "targetUrl": "https://test.example",
+  "executor": {
+    "agent": "实际 Agent 名称",
+    "model": null,
+    "browserTool": "实际使用的工具",
+    "capabilities": ["screenshot"]
+  },
+  "preconditions": [
+    { "index": 0, "satisfied": true, "observation": "实际观察依据" }
+  ]
 }
 ```
 
-未知模型填 null；前置条件为空时传空数组。`index` 对应快照中前置条件的零起始下标。返回 `data.id` 为 runId，`data.snapshot` 为固定执行要求。目标 URL 必须 HTTP(S) 且不能内嵌凭证。
+前置条件为空时传空数组。目标 URL 必须为 HTTP(S) 且不能包含凭证。返回的 `data.id` 是 run ID；此命令只创建记录，不启动或控制浏览器。
 
-## 登记证据和步骤
+## 证据和步骤结果
 
-实际截图保存后，调用 `artifact add --input <文件>`：
-
-```json
-{"runId":"实际运行 ID","stepId":"submit-login","assertionId":"dashboard-visible","kind":"screenshot","source":".casedock/inbox/dashboard.png"}
-```
-
-`source` 必须是相对于测试工作区的文件路径。截图接受 PNG/JPEG，文本使用 `kind: text` 和 UTF-8 文件，每个文件最多 20 MiB。返回 `data.id` 为 artifactId。
-
-`run record --input <文件>`：
+先把真实证据保存到 `.casedock/inbox/`，然后调用 `artifact add`：
 
 ```json
 {
-  "runId":"实际运行 ID",
-  "requestId":"login-submit-record-1",
-  "stepId":"submit-login",
-  "status":"passed",
-  "observation":"填写实际执行观察",
-  "assertions":[{"assertionId":"dashboard-visible","verdict":"passed","observation":"填写断言依据","artifactIds":["实际证据 ID"]}]
+  "runId": "run-id",
+  "stepId": "submit-login",
+  "assertionId": "dashboard-visible",
+  "kind": "screenshot",
+  "source": ".casedock/inbox/dashboard.png"
 }
 ```
 
-步骤状态：passed / failed / blocked / skipped / error。断言结论：passed / failed / inconclusive。passed 要求全部断言均通过且必需证据齐全；failed 要求至少一个失败断言。工具不可用或尚未执行时可提交空 assertions，但状态不能为 passed/failed。
-
-相同 requestId 与相同内容重发是幂等的；同一步骤已提交后不能换 requestId 覆盖。证据应尽量在失败时也保留，不能采集时如实解释。
-
-## 结束运行
-
-`run finish --input <文件>`：
+支持 PNG、JPEG 和 UTF-8 文本，单文件最多 20 MiB。登记后使用返回的 artifact ID 提交步骤：
 
 ```json
-{"runId":"实际运行 ID","status":"completed","reason":"说明执行完成情况"}
+{
+  "runId": "run-id",
+  "requestId": "login-submit-1",
+  "stepId": "submit-login",
+  "status": "passed",
+  "observation": "页面进入工作台",
+  "assertions": [
+    {
+      "assertionId": "dashboard-visible",
+      "verdict": "passed",
+      "observation": "账号名称和工作台标题可见",
+      "artifactIds": ["artifact-id"]
+    }
+  ]
+}
 ```
 
-中断时 status 改为 interrupted 并写明原因。未提交全部检查、前置条件不满足或发生执行错误时，完整通过不会成立。结论由内核计算，禁止手改 `.casedock/runs/*/result.json`。
+步骤状态为 `passed / failed / blocked / skipped / error`，断言结论为 `passed / failed / inconclusive`。同一 `requestId` 和相同内容可以安全重发；同一步骤不能换 ID 覆盖。
 
-## 查看
+## 结束和查看
 
-`case list` / `run list` / `run get <id>` 返回当前资产，`validate` 校验用例文件。`app` 打开可视化编辑器；第一版编辑器展示数据，执行仍在 Agent 中发起。
+```json
+{ "runId": "run-id", "status": "completed", "reason": "全部检查完成" }
+```
+
+通过 `run finish --input <文件>` 提交；中断时将状态改为 `interrupted` 并说明原因。使用 `run list`、`run get <run-id>` 查看记录，使用 `casedock open` 打开本地编辑器。禁止手改 `runs/*/result.json`。

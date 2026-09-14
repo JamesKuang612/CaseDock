@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { lstat, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, realpath, rename, rm } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { CoreError } from './schema.js';
 
@@ -106,5 +106,20 @@ export async function optionalText(path: string): Promise<string | null> {
   } catch (error) {
     if (isFsError(error, 'ENOENT')) return null;
     throw error;
+  }
+}
+
+/** 从当前目录向上寻找 CaseDock 资产库标记，避免依赖工具源码所在位置。 */
+export async function findWorkspace(start: string): Promise<string> {
+  let cursor = await realpath(start);
+  while (true) {
+    if ((await optionalText(join(cursor, 'casedock.yaml'))) !== null) return cursor;
+    const parent = dirname(cursor);
+    if (parent === cursor)
+      throw new CoreError(
+        'WORKSPACE_NOT_FOUND',
+        '找不到 casedock.yaml。请进入测试资产目录、使用 --root 指定目录，或先运行 casedock init。',
+      );
+    cursor = parent;
   }
 }

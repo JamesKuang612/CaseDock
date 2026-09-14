@@ -1,5 +1,9 @@
 export type EvidenceKind = 'screenshot' | 'text';
 export type Verdict = 'passed' | 'failed' | 'inconclusive';
+export interface WorkspaceConfig {
+  schemaVersion: 1;
+  name: string;
+}
 export interface Assertion {
   id: string;
   expect: string;

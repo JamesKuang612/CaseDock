@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdir, readdir, realpath } from 'node:fs/promises';
-import { parseDocument } from 'yaml';
-import type { Artifact, CaseDocument, Run, RunSummary } from './models.js';
+import { basename } from 'node:path';
+import { parseDocument, stringify } from 'yaml';
+import type { Artifact, CaseDocument, Run, RunSummary, WorkspaceConfig } from './models.js';
 import { CoreError, validate, validateCase } from './schema.js';
 import {
   atomicWrite,
@@ -49,6 +50,21 @@ export async function createStore(root: string) {
 export class Store {
   /** 将实例绑定到工作区，不持有可过期的用例或运行内存副本。 */
   constructor(public readonly root: string) {}
+
+  /** 读取资产库名称和格式版本，供 Agent 与本地编辑器确认当前目标目录。 */
+  async getWorkspace(): Promise<WorkspaceConfig & { root: string }> {
+    const content = await optionalText(await safePath(this.root, 'casedock.yaml'));
+    if (content === null)
+      throw new CoreError('WORKSPACE_NOT_FOUND', '当前目录还不是 CaseDock 测试资产库');
+    const doc = parseDocument(content);
+    if (doc.errors.length)
+      throw new CoreError(
+        'VALIDATION',
+        'casedock.yaml 无法解析',
+        doc.errors.map((error) => error.message),
+      );
+    return { ...validate('workspace', doc.toJS({ maxAliasCount: 20 })), root: this.root };
+  }
 
   /** 枚举目录中的目标文件；尚未初始化的目录返回空列表。 */
   private async names(path: string, suffix: string) {
@@ -170,6 +186,10 @@ export class Store {
         receipts: [],
       };
       await this.writeRun(run);
+      await atomicWrite(
+        await safePath(this.root, `runs/${run.id}/case.snapshot.yaml`),
+        stringify(run.snapshot),
+      );
       return run;
     });
   }
@@ -178,9 +198,7 @@ export class Store {
   async getRun(id: string): Promise<Run> {
     checkId(id);
     try {
-      const bytes = await readBounded(
-        await safePath(this.root, `.casedock/runs/${id}/result.json`),
-      );
+      const bytes = await readBounded(await safePath(this.root, `runs/${id}/result.json`));
       const run = validate('run', JSON.parse(bytes.toString('utf8')));
       if (run.id !== id || run.snapshot.id !== run.caseId)
         throw new CoreError('VALIDATION', '运行记录身份不一致');
@@ -196,7 +214,7 @@ export class Store {
   async listRuns() {
     const runs: RunSummary[] = [];
     const errors: { path: string; message: string }[] = [];
-    for (const name of await this.names('.casedock/runs', '')) {
+    for (const name of await this.names('runs', '')) {
       try {
         const run = await this.getRun(name);
         const { id, caseId, caseRevision, environment, status, verdict, startedAt, executor } = run;
@@ -217,7 +235,7 @@ export class Store {
     const content = JSON.stringify(run, null, 2);
     if (Buffer.byteLength(content) > 4 * 1024 * 1024)
       throw new CoreError('FILE_SIZE', '运行记录超过 4 MiB，请缩短观察内容');
-    await atomicWrite(await safePath(this.root, `.casedock/runs/${run.id}/result.json`), content);
+    await atomicWrite(await safePath(this.root, `runs/${run.id}/result.json`), content);
   }
 
   /** 阻止修改已经结束的运行，重测应新建运行。 */
@@ -265,11 +283,8 @@ export class Store {
         createdAt: new Date().toISOString(),
         mime,
       };
-      artifact.path = `artifacts/${artifact.id}.${extension}`;
-      await atomicWrite(
-        await safePath(this.root, `.casedock/runs/${run.id}/${artifact.path}`),
-        bytes,
-      );
+      artifact.path = `evidence/${artifact.id}.${extension}`;
+      await atomicWrite(await safePath(this.root, `runs/${run.id}/${artifact.path}`), bytes);
       run.artifacts.push(artifact);
       await this.writeRun(run);
       return artifact;
@@ -282,10 +297,10 @@ export class Store {
     const artifact = run.artifacts.find((item) => item.id === artifactId);
     if (!artifact) throw new CoreError('NOT_FOUND', '找不到证据');
     // 只允许登记生成的文件名，不能通过修改 result.json 读取别的项目文件。
-    if (!new RegExp(`^artifacts/${artifact.id}\\.(png|jpg|txt)$`).test(artifact.path))
+    if (!new RegExp(`^evidence/${artifact.id}\\.(png|jpg|txt)$`).test(artifact.path))
       throw new CoreError('UNSAFE_PATH', '证据路径无效');
     const bytes = await readBounded(
-      await safePath(this.root, `.casedock/runs/${run.id}/${artifact.path}`),
+      await safePath(this.root, `runs/${run.id}/${artifact.path}`),
       20 * 1024 * 1024,
     );
     if (digest(bytes) !== artifact.sha256 || bytes.length !== artifact.bytes)
@@ -388,16 +403,33 @@ export class Store {
     });
   }
 
-  /** 初始化用例目录和忽略规则，不覆盖团队已有文件。 */
-  async init() {
+  /** 初始化独立测试资产库；用例、运行和最终证据均可由 Git 管理。 */
+  async init(name = basename(this.root)) {
     return withWriteLock(this.root, async () => {
+      const configPath = await safePath(this.root, 'casedock.yaml');
+      const existingConfig = await optionalText(configPath);
+      if (existingConfig === null) {
+        const config: WorkspaceConfig = { schemaVersion: 1, name };
+        validate('workspace', config);
+        await atomicWrite(configPath, stringify(config));
+      } else {
+        const doc = parseDocument(existingConfig);
+        if (doc.errors.length) throw new CoreError('VALIDATION', 'casedock.yaml 无法解析');
+        validate('workspace', doc.toJS({ maxAliasCount: 20 }));
+      }
       await mkdir(await safePath(this.root, 'cases'), { recursive: true });
+      await mkdir(await safePath(this.root, 'runs'), { recursive: true });
       await mkdir(await safePath(this.root, '.casedock/inbox'), { recursive: true });
       const ignore = await safePath(this.root, '.gitignore');
       const current = (await optionalText(ignore)) ?? '';
       if (!current.split(/\r?\n/).includes('.casedock/'))
         await atomicWrite(ignore, `${current.trimEnd()}\n.casedock/\n`);
-      return { root: this.root, casesDirectory: 'cases', inbox: '.casedock/inbox' };
+      return {
+        ...(await this.getWorkspace()),
+        casesDirectory: 'cases',
+        runsDirectory: 'runs',
+        inbox: '.casedock/inbox',
+      };
     });
   }
 }

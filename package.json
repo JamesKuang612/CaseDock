@@ -7,21 +7,23 @@
   "bin": {
     "casedock": "build/cli.js"
   },
+  "files": ["build", "skills", "examples/sample-workspace", "README.md"],
   "engines": {
     "node": ">=24"
   },
   "scripts": {
     "dev": "concurrently -k -n api,ui \"npm:dev:api\" \"npm:dev:ui\"",
-    "dev:api": "tsx watch src/cli.ts app --no-open --dev",
+    "dev:api": "tsx watch src/cli.ts --root examples/sample-workspace open --port 4310 --no-open --dev",
     "dev:ui": "vite",
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && tsup && vite build",
-    "start": "node build/cli.js app",
+    "start": "node build/cli.js --root examples/sample-workspace open",
     "test": "node --import tsx --test tests/*.test.ts",
     "test:e2e": "npm run build && node --import tsx --test tests/*.e2e.ts",
     "format": "prettier --write src tests vite.config.ts tsup.config.ts",
     "format:check": "prettier --check src tests vite.config.ts tsup.config.ts",
-    "check": "npm run format:check && npm run test && npm run build"
+    "check": "npm run format:check && npm run test && npm run build",
+    "prepack": "npm run check"
   },
   "dependencies": {
     "@fastify/static": "10.1.3",

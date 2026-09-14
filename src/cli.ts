@@ -1,10 +1,13 @@
 #!/usr/bin/env node
+import { cp } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Command, InvalidArgumentError } from 'commander';
 import open from 'open';
 import { createServer } from './server/index.js';
 import { createStore } from './core/store.js';
 import { CoreError, schemas } from './core/schema.js';
-import { readBounded } from './core/files.js';
+import { findWorkspace, isFsError, readBounded, safePath } from './core/files.js';
 
 /** 校验本地服务端口，防止把非法输入传入网络监听。 */
 function parsePort(value: string) {
@@ -39,41 +42,89 @@ function output(data: unknown) {
 
 const cli = new Command()
   .name('casedock')
-  .description('CaseDock — 使用你自己的 Agent 的测试资产工作台')
-  .option('--root <path>', '测试工作区路径', process.cwd());
+  .description('CaseDock — 跨 Agent 的测试资产与证据工作台')
+  .option('--root <path>', '测试资产库路径；默认从当前目录向上查找 casedock.yaml');
 
-/** 按全局 root 参数创建仓库，使 Agent 可以从任意目录调用。 */
+/** 解析显式目录或自动发现资产库；初始化允许使用尚无标记的当前目录。 */
+async function workspaceRoot(allowUninitialized = false) {
+  const explicit = cli.opts<{ root?: string }>().root;
+  if (explicit) return resolve(explicit);
+  return allowUninitialized ? process.cwd() : findWorkspace(process.cwd());
+}
+
+/** 为 CLI 命令创建已初始化的资产仓库，避免误写工具源码或普通项目目录。 */
 async function store() {
-  return createStore(cli.opts<{ root: string }>().root);
+  const repository = await createStore(await workspaceRoot());
+  await repository.getWorkspace();
+  return repository;
 }
 
 cli
-  .command('app')
-  .description('启动本地编辑器')
-  .option('-p, --port <number>', '本地端口', parsePort, 4310)
+  .command('open [path]')
+  .alias('app')
+  .description('打开指定测试资产库的本地编辑器')
+  .option('-p, --port <number>', '本地端口；省略时自动选择空闲端口', parsePort, 0)
   .option('--no-open', '不自动打开浏览器')
   .option('--dev', '允许 Vite 开发页面访问')
-  .action(async (options: { port: number; open: boolean; dev?: boolean }) => {
-    const server = await createServer(cli.opts<{ root: string }>().root, options.dev);
-    const address = await server.listen({ host: '127.0.0.1', port: options.port });
-    console.error(`CaseDock: ${address}`);
-    for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-      process.once(signal, () => {
-        void server.close().then(() => process.exit(0));
-      });
-    }
-    if (options.open) {
-      try {
-        await open(address);
-      } catch {
-        console.error(`请在浏览器中打开 ${address}`);
+  .action(
+    async (path: string | undefined, options: { port: number; open: boolean; dev?: boolean }) => {
+      const root = path ? resolve(path) : await workspaceRoot();
+      const repository = await createStore(root);
+      await repository.getWorkspace();
+      const server = await createServer(root, options.dev);
+      const address = await server.listen({ host: '127.0.0.1', port: options.port });
+      console.error(`CaseDock: ${address}`);
+      for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+        process.once(signal, () => {
+          void server.close().then(() => process.exit(0));
+        });
       }
-    }
-  });
+      if (options.open) {
+        try {
+          await open(address);
+        } catch {
+          console.error(`请在浏览器中打开 ${address}`);
+        }
+      }
+    },
+  );
 cli
   .command('init')
-  .description('初始化用例目录和本地运行目录')
-  .action(async () => output(await (await store()).init()));
+  .description('将当前目录初始化为独立测试资产库')
+  .option('--name <name>', '资产库显示名称')
+  .action(async (options: { name?: string }) => {
+    const repository = await createStore(await workspaceRoot(true));
+    output(await repository.init(options.name));
+  });
+const skill = cli.command('skill').description('安装或定位 CaseDock 测试记录 Skill');
+skill
+  .command('install')
+  .description('将 Skill 安装到当前资产库的开放 Agent Skills 目录')
+  .option('--target <path>', '资产库内的目标目录', '.agents/skills/casedock-testing')
+  .action(async (options: { target: string }) => {
+    const root = await workspaceRoot();
+    const source = fileURLToPath(new URL('../skills/casedock-testing/', import.meta.url));
+    const destination = await safePath(root, options.target);
+    try {
+      await cp(source, destination, { recursive: true, errorOnExist: true, force: false });
+    } catch (error) {
+      if (
+        isFsError(error, 'EEXIST') ||
+        (error as NodeJS.ErrnoException).code === 'ERR_FS_CP_EEXIST'
+      )
+        throw new CoreError('CONFLICT', '目标 Skill 已存在；请先审阅并自行合并更新');
+      throw error;
+    }
+    output({ source, path: options.target });
+  });
+skill
+  .command('path')
+  .description('输出安装包内的 Skill 路径')
+  .action(() =>
+    output({
+      path: fileURLToPath(new URL('../skills/casedock-testing/SKILL.md', import.meta.url)),
+    }),
+  );
 cli
   .command('schema')
   .description('输出所有输入和资产的 JSON Schema')

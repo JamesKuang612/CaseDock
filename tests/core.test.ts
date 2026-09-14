@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { join, resolve, relative } from 'node:path';
 import { createStore } from '../src/core/store.js';
 import { CoreError } from '../src/core/schema.js';
-import { withWriteLock } from '../src/core/files.js';
+import { findWorkspace, withWriteLock } from '../src/core/files.js';
 import { createServer } from '../src/server/index.js';
 import type { RecordInput, TestCase } from '../src/core/models.js';
 
@@ -134,6 +134,10 @@ test('证据齐全时可通过，提交幂等且结束后不可修改', async (t
     source: '.casedock/inbox/result.png',
   });
   const input = passed(run.id, [artifact.id]);
+  assert.match(
+    await readFile(join(root, 'runs', run.id, 'case.snapshot.yaml'), 'utf8'),
+    /id: login/,
+  );
   await store.recordStep(input);
   assert.equal((await store.recordStep(input)).steps.length, 1);
   await assert.rejects(
@@ -166,7 +170,7 @@ test('证据不能跨运行关联，登记后被修改会阻止通过', async (t
   });
   await assert.rejects(store.recordStep(passed(second.id, [artifact.id])), code('VALIDATION'));
   await store.recordStep(passed(first.id, [artifact.id]));
-  await writeFile(join(root, '.casedock/runs', first.id, artifact.path), 'changed');
+  await writeFile(join(root, 'runs', first.id, artifact.path), 'changed');
   await assert.rejects(
     store.finishRun({ runId: first.id, status: 'completed', reason: '完成' }),
     code('EVIDENCE_CHANGED'),
@@ -285,6 +289,11 @@ test('修改标题保留未变步骤注释，初始化重复运行不破坏忽�
   });
   assert.match(await readFile(path, 'utf8'), /团队的步骤说明/);
   const ignore = await readFile(join(root, '.gitignore'), 'utf8');
+  assert.match(await readFile(join(root, 'casedock.yaml'), 'utf8'), /schemaVersion: 1/);
+  assert.equal((await store.getWorkspace()).root, root);
+  const nested = join(root, 'nested/project');
+  await mkdir(nested, { recursive: true });
+  assert.equal(await findWorkspace(nested), root);
   await store.init();
   assert.equal(await readFile(join(root, '.gitignore'), 'utf8'), ignore);
 });
