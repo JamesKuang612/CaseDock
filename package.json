@@ -1,6 +1,6 @@
 {
   "name": "casedock",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.1",
   "description": "跨 Agent 的本地测试资产与证据工作台",
   "license": "MIT",
   "repository": {
@@ -11,12 +11,24 @@
   "bugs": {
     "url": "https://github.com/JamesKuang612/CaseDock/issues"
   },
-  "keywords": ["testing", "agent", "evidence", "test-cases", "local-first"],
+  "keywords": [
+    "testing",
+    "agent",
+    "evidence",
+    "test-cases",
+    "local-first"
+  ],
   "type": "module",
   "bin": {
     "casedock": "build/cli.js"
   },
-  "files": ["build", "skills", "examples/sample-workspace", "README.md", "LICENSE"],
+  "files": [
+    "build",
+    "skills",
+    "examples/sample-workspace",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=22"
   },
@@ -39,6 +51,7 @@
   },
   "dependencies": {
     "@fastify/static": "10.1.3",
+    "@playwright/cli": "0.1.20",
     "ajv": "8.20.0",
     "antd": "6.6.3",
     "commander": "15.0.0",

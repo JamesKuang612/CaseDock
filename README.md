@@ -1,6 +1,6 @@
 # CaseDock
 
-CaseDock 是跨 Agent 的测试资产与证据工作台。它不控制浏览器，也不规定 Agent 如何执行测试；它只统一保存测试用例、逐步观察、断言结论和截图等证据，让结果可以脱离聊天记录，通过普通文件和 Git 长期复用。
+CaseDock 是跨 Agent 的测试资产与证据工作台。它不规定 Agent 如何理解和执行测试；它统一保存测试用例、逐步观察、断言结论和截图等证据，让结果可以脱离聊天记录，通过普通文件和 Git 长期复用。对于没有交互式浏览器工具的 Agent，CaseDock 还提供可选的可见浏览器 CLI 作为兜底。
 
 ## 产品边界
 
@@ -8,13 +8,15 @@ CaseDock 是跨 Agent 的测试资产与证据工作台。它不控制浏览器�
 
 ```text
 Agent ── 自己的浏览器能力 ── 被测网站
+  │              或
+  │       CaseDock Browser（可选兜底）
   │
   └── CaseDock Skill / CLI ── 独立测试资产目录
                                   │
 本地浏览器 ── CaseDock Editor ────┘
 ```
 
-CaseDock 不包含模型 SDK、Agent loop、浏览器执行引擎、定位器或自动修复逻辑。MCP 是未来可选的 Agent 接口，不是第一版运行条件。
+CaseDock 不包含模型 SDK、Agent loop、定位决策或自动修复逻辑。可选的 CaseDock Browser 仅包装官方 Playwright CLI，提供打开、点击、输入和截图等机械能力，不接管 Agent 的测试判断。MCP 是未来可选的 Agent 接口，不是第一版运行条件。
 
 ## 当前 POC
 
@@ -26,6 +28,8 @@ CaseDock 不包含模型 SDK、Agent loop、浏览器执行引擎、定位器或
 - 本地只读页面打开指定资产库，展示用例、运行详情和证据；新建与修改统一由 Agent 完成。
 - 自动记录测试时间并计算耗时；保存初始地址和本次使用的明文测试账密；宿主能提供准确数据时可记录 Token 总消耗。
 - 用例 revision、运行快照、幂等步骤记录、原子写入和证据哈希仍由共享内核保证。
+- `casedock doctor` 检查资产库和 CaseDock Browser；Agent 原生工具仍由 Agent 自己判断。
+- `casedock browser` 为缺少原生交互工具的 Agent 提供可见浏览器兜底，不要求配置 MCP 或切换对话。
 
 ## 开发环境
 
@@ -39,11 +43,11 @@ npm run check
 
 ## 使用本地 npm 安装包体验 POC
 
-当前 beta 尚未发布到 npm Registry。先在源码目录生成真实安装包：
+开发中的版本可以先在源码目录生成真实安装包：
 
 ```bash
 npm pack
-npm install --global ./casedock-0.1.0-beta.0.tgz
+npm install --global ./casedock-<version>.tgz
 ```
 
 随后在 CaseDock 源码目录之外准备资产库：
@@ -65,7 +69,7 @@ node <CaseDock目录>/build/cli.js --root <测试资产目录> setup --name "团
 node <CaseDock目录>/build/cli.js --root <测试资产目录> open
 ```
 
-未来正式发布 npm beta 后，安装命令将简化为：
+已发布版本可以直接安装：
 
 ```bash
 npm install --global casedock@beta
@@ -77,9 +81,24 @@ npm install --global casedock@beta
 
 资产库安装 Skill 后，在该目录启动 Agent 并提出正常测试需求，例如：
 
-> 使用 CaseDock 执行登录回归测试。你可以自由使用现有浏览器能力；请把结构化用例、每个业务步骤的观察、结论和截图证据保存到当前测试资产库，最后告诉我 run ID 和结果。
+> 使用 CaseDock 执行登录回归测试。优先使用你已经具备的交互式浏览器能力；若没有则检查 CaseDock Browser。请把结构化用例、每个业务步骤的观察、结论和截图证据保存到当前测试资产库，最后告诉我 run ID 和结果。
 
-Skill 会指导 Agent 为每个新场景创建具有自动唯一 ID 的用例、在操作前冻结快照、逐步归档证据，并在结束或中断时保存最终状态。只有用户明确指定 Case ID 时才读取并重测已有用例。CLI 具体输入见 [接口参考](skills/casedock-testing/references/commands.md)。
+Skill 会指导 Agent 先判断当前任务是否已经具有真正的点击、输入和截图能力；没有时才使用 CaseDock Browser。它还会为每个新场景创建具有自动唯一 ID 的用例、在操作前冻结快照、逐步归档证据，并在结束或中断时保存最终状态。只有用户明确指定 Case ID 时才读取并重测已有用例。CLI 具体输入见 [接口参考](skills/casedock-testing/references/commands.md)。
+
+## 可选浏览器兜底
+
+CaseDock Browser 不替代 Agent 自带的 Chrome、Browser、Computer Use 或 Playwright MCP。只有当前任务没有可交互浏览器工具时才使用：
+
+```bash
+casedock doctor
+casedock browser install-browser chromium
+casedock browser open https://example.com
+casedock browser snapshot
+casedock browser screenshot --filename=.casedock/inbox/result.png
+casedock browser close
+```
+
+`open` 默认启动可见浏览器，用户可以实时观察。CaseDock Browser 安装完成后是普通 CLI，不需要重启 Agent；安装 Chromium 会产生额外下载，未经用户同意不应自动执行。完整的 Agent 使用方式见 [浏览器兜底](skills/casedock-testing/references/browser.md)。
 
 ## 资产目录
 
@@ -103,6 +122,8 @@ runs/
 
 ```bash
 casedock setup --name "团队回归测试"
+casedock doctor --json
+casedock browser --help
 casedock init
 casedock skill install
 casedock schema --json
@@ -138,5 +159,6 @@ npm run test:e2e
 - 可复用模块和变量管理
 - Git LFS/远端证据存储策略
 - 运行结果导入导出及跨团队聚合
+- 自动识别各 Agent 私有的浏览器工具；该判断目前由 Agent 根据当前工具清单完成
 
 设计边界见 [架构](docs/architecture.md)，POC 计划见 [路线图](docs/roadmap.md)。

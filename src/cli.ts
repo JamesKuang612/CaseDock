@@ -8,6 +8,7 @@ import { createServer } from './server/index.js';
 import { createStore } from './core/store.js';
 import { CoreError, schemas } from './core/schema.js';
 import { findWorkspace, isFsError, readBounded, safePath } from './core/files.js';
+import { inspectBrowserFallback, runBundledBrowser } from './browser/adapter.js';
 
 const defaultSkillTarget = '.agents/skills/casedock-testing';
 
@@ -91,6 +92,7 @@ function outputSetup(
       `执行目录：${workspace.runsDirectory}/`,
       '',
       '现在可以在该目录打开 Agent，并要求它使用 CaseDock 执行测试。',
+      '首次测试前可运行 casedock doctor 检查浏览器兜底。',
     ].join('\n'),
   );
 }
@@ -98,6 +100,7 @@ function outputSetup(
 const cli = new Command()
   .name('casedock')
   .description('CaseDock — 跨 Agent 的测试资产与证据工作台')
+  .enablePositionalOptions()
   .option('--root <path>', '测试资产库路径；默认从当前目录向上查找 casedock.yaml');
 
 /** 解析显式目录或自动发现资产库；初始化允许使用尚无标记的当前目录。 */
@@ -113,6 +116,72 @@ async function store() {
   await repository.getWorkspace();
   return repository;
 }
+
+/** 检查当前目录能否识别资产库；doctor 不因尚未 setup 而整体失败。 */
+async function inspectWorkspace() {
+  try {
+    const root = await workspaceRoot();
+    const repository = await createStore(root);
+    const workspace = await repository.getWorkspace();
+    return { ready: true, root: workspace.root, name: workspace.name };
+  } catch (error) {
+    return {
+      ready: false,
+      root: null,
+      name: null,
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+cli
+  .command('doctor')
+  .description('检查资产库和可选的 CaseDock Browser 兜底能力')
+  .option('--json', '输出机器可读结果')
+  .action(async (options: { json?: boolean }) => {
+    const result = {
+      workspace: await inspectWorkspace(),
+      browserFallback: inspectBrowserFallback(),
+      nativeAgentBrowser: {
+        detectable: false,
+        detail: 'Agent 自带的交互工具只能由当前 Agent 根据自己的工具清单判断',
+      },
+    };
+    if (options.json) output(result);
+    else {
+      const workspace = result.workspace.ready
+        ? `可用（${result.workspace.root}）`
+        : `不可用（${result.workspace.detail}）`;
+      const browser = result.browserFallback.ready
+        ? `可用（Playwright CLI ${result.browserFallback.cliVersion}）`
+        : `不可用（${result.browserFallback.detail}）`;
+      console.log(
+        [
+          'CaseDock 环境检查',
+          '',
+          `资产库：${workspace}`,
+          `CaseDock Browser：${browser}`,
+          'Agent 原生浏览器：请由当前 Agent 根据已加载工具判断',
+          '',
+          result.browserFallback.ready
+            ? '浏览器兜底已准备完成。'
+            : `安装命令：${result.browserFallback.installCommand}`,
+        ].join('\n'),
+      );
+    }
+  });
+
+cli
+  .command('browser [args...]')
+  .description('调用随包分发的可见 Playwright CLI；仅在 Agent 没有更合适的原生工具时使用')
+  .helpOption(false)
+  .allowUnknownOption(true)
+  .allowExcessArguments(true)
+  .passThroughOptions()
+  .action(async (args: string[]) => {
+    const code = await runBundledBrowser(args);
+    if (code !== 0) process.exitCode = code;
+  });
 
 cli
   .command('open [path]')

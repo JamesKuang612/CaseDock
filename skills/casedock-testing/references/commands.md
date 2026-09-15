@@ -8,6 +8,7 @@
 
 ```text
 casedock --root <目录> init --name <名称>
+casedock doctor --json
 casedock case get <case-id> --json
 casedock validate --json
 ```

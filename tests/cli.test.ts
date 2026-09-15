@@ -31,6 +31,22 @@ test('setup 一次初始化资产库并安装 Skill，重复执行不覆盖已�
   const skillPath = join(root, '.agents/skills/casedock-testing/SKILL.md');
   assert.match(await readFile(skillPath, 'utf8'), /CaseDock 测试资产记录/);
 
+  const doctor = spawnSync(
+    process.execPath,
+    ['--import', 'tsx', 'src/cli.ts', '--root', root, 'doctor', '--json'],
+    {
+      cwd: process.cwd(),
+      windowsHide: true,
+      encoding: 'utf8',
+    },
+  );
+  assert.equal(doctor.status, 0, doctor.stderr);
+  const diagnosis = JSON.parse(doctor.stdout).data;
+  assert.equal(diagnosis.workspace.ready, true);
+  assert.equal(diagnosis.workspace.root, root);
+  assert.equal(diagnosis.browserFallback.cliAvailable, true);
+  assert.equal(diagnosis.nativeAgentBrowser.detectable, false);
+
   await writeFile(skillPath, '用户保留的 Skill\n');
   const second = spawnSync(process.execPath, args, {
     cwd: process.cwd(),
@@ -80,7 +96,7 @@ test('CLI 通过 stdin 串联创建、执行记录、截图证据和结束，失
   call(['skill', 'install']);
   assert.match(
     await readFile(join(root, '.agents/skills/casedock-testing/SKILL.md'), 'utf8'),
-    /CaseDock 约束测试资产如何保存，不约束测试如何执行/,
+    /CaseDock Browser 只是在当前 Agent 没有交互式浏览器工具时提供的可选兜底/,
   );
   const document = call(['case', 'create'], {
     schemaVersion: 1,
