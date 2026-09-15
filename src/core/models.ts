@@ -86,6 +86,54 @@ export interface FinishInput {
   reason: string;
   tokenUsage?: { total: number; source: string } | null;
 }
+export interface SubmitTestInput {
+  schemaVersion: 1;
+  testCase: {
+    title: string;
+    tags: string[];
+    preconditions: {
+      description: string;
+      satisfied: boolean;
+      observation: string;
+    }[];
+    steps: {
+      action: string;
+      assertions: {
+        expect: string;
+        evidence: RequiredEvidenceKind[];
+      }[];
+    }[];
+  };
+  run: {
+    initialUrl: string;
+    credentials: StartRunInput['credentials'];
+    executor: StartRunInput['executor'];
+    startedAt: string;
+    status: 'completed' | 'interrupted';
+    reason: string;
+    tokenUsage?: { total: number; source: string } | null;
+  };
+  results: {
+    step: number;
+    status: StepResult['status'];
+    observation: string;
+    assertions: {
+      assertion: number;
+      verdict: Verdict;
+      observation: string;
+      evidence: string[];
+    }[];
+  }[];
+}
+export interface SubmitTestResult {
+  caseId: string;
+  runId: string;
+  verdict: Verdict;
+  casePath: string;
+  runPath: string;
+  evidenceDirectory: string;
+  artifactCount: number;
+}
 export interface Run {
   schemaVersion: 1;
   id: string;

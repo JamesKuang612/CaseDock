@@ -108,6 +108,130 @@ test('自动创建允许同名用例并生成互不重复的 Case ID', async (t)
   await assert.rejects(store.createCase({ ...definition, id: 'agent-chosen' }), code('VALIDATION'));
 });
 
+test('一次性提交在一条调用内生成用例、运行和全部截图关联', async (t) => {
+  const { root, store } = await fixture(t);
+  await writeFile(join(root, '.casedock/inbox/dashboard.png'), png);
+  const startedAt = new Date(Date.now() - 5_000).toISOString();
+  const submitted = await store.submitTest({
+    schemaVersion: 1,
+    testCase: {
+      title: '一次性提交登录检查',
+      tags: ['smoke'],
+      preconditions: [
+        { description: '测试账号可用', satisfied: true, observation: '账号已成功登录' },
+      ],
+      steps: [
+        {
+          action: '登录并检查工作台',
+          assertions: [
+            { expect: '工作台可见', evidence: ['screenshot'] },
+            { expect: '账号名称可见', evidence: ['screenshot'] },
+          ],
+        },
+      ],
+    },
+    run: {
+      initialUrl: 'https://example.test/login',
+      credentials: { account: 'tester', password: 'plain-password' },
+      executor: {
+        agent: 'test-agent',
+        model: null,
+        browserTool: 'native-browser',
+        capabilities: ['screenshot'],
+      },
+      startedAt,
+      status: 'completed',
+      reason: '全部检查完成',
+    },
+    results: [
+      {
+        step: 1,
+        status: 'passed',
+        observation: '已进入工作台',
+        assertions: [
+          {
+            assertion: 1,
+            verdict: 'passed',
+            observation: '工作台标题可见',
+            evidence: ['.casedock/inbox/dashboard.png'],
+          },
+          {
+            assertion: 2,
+            verdict: 'passed',
+            observation: '账号名称可见',
+            evidence: ['.casedock/inbox/dashboard.png'],
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.match(submitted.caseId, /^case-[0-9a-f-]{36}$/);
+  assert.match(submitted.runId, /^run-[0-9a-f-]{36}$/);
+  assert.equal(submitted.verdict, 'passed');
+  assert.equal(submitted.artifactCount, 2);
+  const testCase = await store.getCase(submitted.caseId);
+  assert.equal(testCase.testCase.steps[0]?.id, 'step-1');
+  assert.equal(testCase.testCase.steps[0]?.assertions[1]?.id, 'assertion-1-2');
+  const run = await store.getRun(submitted.runId);
+  assert.equal(run.startedAt, startedAt);
+  assert.equal(run.steps.length, 1);
+  assert.equal(run.artifacts.length, 2);
+  assert.deepEqual((await store.readArtifact(run.id, run.artifacts[0]!.id)).bytes, png);
+});
+
+test('一次性提交在证据或结构无效时不留下半成品资产', async (t) => {
+  const { store } = await fixture(t);
+  const beforeCases = await store.listCases();
+  await assert.rejects(
+    store.submitTest({
+      schemaVersion: 1,
+      testCase: {
+        title: '缺少证据',
+        tags: [],
+        preconditions: [],
+        steps: [
+          {
+            action: '检查页面',
+            assertions: [{ expect: '页面可见', evidence: ['screenshot'] }],
+          },
+        ],
+      },
+      run: {
+        initialUrl: 'https://example.test',
+        credentials: null,
+        executor: {
+          agent: 'test-agent',
+          model: null,
+          browserTool: 'native-browser',
+          capabilities: ['screenshot'],
+        },
+        startedAt: new Date(Date.now() - 1_000).toISOString(),
+        status: 'completed',
+        reason: '完成',
+      },
+      results: [
+        {
+          step: 1,
+          status: 'passed',
+          observation: '声称通过',
+          assertions: [
+            {
+              assertion: 1,
+              verdict: 'passed',
+              observation: '没有截图',
+              evidence: [],
+            },
+          ],
+        },
+      ],
+    }),
+    code('MISSING_EVIDENCE'),
+  );
+  assert.equal((await store.listCases()).cases.length, beforeCases.cases.length);
+  assert.equal((await store.listRuns()).runs.length, 0);
+});
+
 test('初始地址与共用测试账密按原值记录，并拒绝废弃的环境字段', async (t) => {
   const { store, start } = await fixture(t);
   const initialUrl = 'https://example.test/login';

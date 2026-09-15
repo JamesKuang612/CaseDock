@@ -8,6 +8,7 @@ import type {
   Run,
   SaveCaseInput,
   StartRunInput,
+  SubmitTestInput,
   TestCase,
   WorkspaceConfig,
 } from './models.js';
@@ -131,6 +132,65 @@ export const schemas = {
     },
     ['tokenUsage'],
   ),
+  submitTest: object({
+    schemaVersion: { const: 1 },
+    testCase: object({
+      title: text,
+      tags: { ...array(text), uniqueItems: true },
+      preconditions: array(
+        object({
+          description: text,
+          satisfied: { type: 'boolean' },
+          observation: text,
+        }),
+      ),
+      steps: array(
+        object({
+          action: text,
+          assertions: array(
+            object({
+              expect: text,
+              evidence: { ...array(screenshotEvidence), uniqueItems: true },
+            }),
+            1,
+          ),
+        }),
+        1,
+      ),
+    }),
+    run: object(
+      {
+        initialUrl: text,
+        credentials,
+        executor,
+        startedAt: text,
+        status: { enum: ['completed', 'interrupted'] },
+        reason: text,
+        tokenUsage: {
+          anyOf: [
+            object({ total: { type: 'integer', minimum: 0 }, source: text }),
+            { type: 'null' },
+          ],
+        },
+      },
+      ['tokenUsage'],
+    ),
+    results: array(
+      object({
+        step: { type: 'integer', minimum: 1 },
+        status: { enum: ['passed', 'failed', 'blocked', 'skipped', 'error'] },
+        observation: text,
+        assertions: array(
+          object({
+            assertion: { type: 'integer', minimum: 1 },
+            verdict,
+            observation: text,
+            evidence: { ...array(text, 0, 50), uniqueItems: true },
+          }),
+        ),
+      }),
+    ),
+  }),
   run: object(
     {
       schemaVersion: { const: 1 },
@@ -172,6 +232,7 @@ interface Inputs {
   recordStep: RecordInput;
   addArtifact: ArtifactInput;
   finishRun: FinishInput;
+  submitTest: SubmitTestInput;
   run: Run;
 }
 const ajv = new Ajv({ allErrors: true });

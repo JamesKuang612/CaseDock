@@ -1,6 +1,6 @@
 {
   "name": "casedock",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "description": "跨 Agent 的本地测试资产与证据工作台",
   "license": "MIT",
   "repository": {

@@ -30,6 +30,7 @@ CaseDock 不包含模型 SDK、Agent loop、定位决策或自动修复逻辑。
 - 用例 revision、运行快照、幂等步骤记录、原子写入和证据哈希仍由共享内核保证。
 - `casedock doctor` 检查资产库和 CaseDock Browser；Agent 原生工具仍由 Agent 自己判断。
 - `casedock browser` 为缺少原生交互工具的 Agent 提供可见浏览器兜底，不要求配置 MCP 或切换对话。
+- 普通新测试结束后用一次 `casedock test submit` 校验并保存用例、Run 和全部截图，不要求 Agent 在测试过程中编排多条记录命令。
 
 ## 开发环境
 
@@ -81,9 +82,9 @@ npm install --global casedock@beta
 
 资产库安装 Skill 后，在该目录启动 Agent 并提出正常测试需求，例如：
 
-> 使用 CaseDock 执行登录回归测试。优先使用你已经具备的交互式浏览器能力；若没有则检查 CaseDock Browser。请把结构化用例、每个业务步骤的观察、结论和截图证据保存到当前测试资产库，最后告诉我 run ID 和结果。
+> 使用 CaseDock 执行登录回归测试。请把结构化用例、每个业务步骤的观察、结论和截图证据保存到当前测试资产库，最后告诉我 run ID 和结果。
 
-Skill 会指导 Agent 先判断当前任务是否已经具有真正的点击、输入和截图能力；没有时才使用 CaseDock Browser。它还会为每个新场景创建具有自动唯一 ID 的用例、在操作前冻结快照、逐步归档证据，并在结束或中断时保存最终状态。只有用户明确指定 Case ID 时才读取并重测已有用例。CLI 具体输入见 [接口参考](skills/casedock-testing/references/commands.md)。
+Skill 会指导 Agent 先判断当前任务是否已经具有真正的点击、输入和截图能力。没有时不会直接启用兜底，而是先建议安装宿主官方支持的 MCP、插件或 Computer Use，由用户决定暂停安装还是使用 CaseDock Browser。测试完成后，Agent 只需提交一份清单，CaseDock 会一次生成具有唯一 ID 的用例、运行快照、结果和证据。只有用户明确指定 Case ID 时才读取并重测已有用例。CLI 具体输入见 [接口参考](skills/casedock-testing/references/commands.md)。
 
 ## 可选浏览器兜底
 
@@ -128,6 +129,7 @@ casedock init
 casedock skill install
 casedock schema --json
 casedock validate --json
+casedock test submit --input <JSON文件>
 casedock case create --input <JSON文件>
 casedock case list --json
 casedock case get <id> --json

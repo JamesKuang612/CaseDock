@@ -1,40 +1,67 @@
 # CaseDock CLI 接口
 
-仅在需要读写资产时阅读本页。已安装版本使用 `casedock`；在 CaseDock 源码仓库开发时使用 `node build/cli.js`。通过 `--root <目录>` 可显式指定资产库，否则 CLI 从当前目录向上寻找 `casedock.yaml`。
+仅在准备保存测试资产时阅读本页。已安装版本使用 `casedock`；在 CaseDock 源码仓库开发时使用 `node build/cli.js`。通过 `--root <目录>` 可显式指定资产库，否则 CLI 从当前目录向上寻找 `casedock.yaml`。
 
-复杂输入保存到资产库的 `.casedock/inbox/`，通过 `--input <文件>` 提交，也可以使用 `--input -` 从 stdin 读取 JSON。用 `casedock schema` 获取当前精确 Schema。
+## 新测试：一次提交
 
-## 初始化和读取
+把本场景截图保存到资产库的 `.casedock/inbox/`，再将一份 JSON 清单交给：
 
 ```text
-casedock --root <目录> init --name <名称>
-casedock doctor --json
-casedock case get <case-id> --json
-casedock validate --json
+casedock test submit --input .casedock/inbox/submit.json
 ```
 
-初始化生成 `casedock.yaml`、`cases/`、`runs/` 和临时 `.casedock/inbox/`。
-普通新测试不要调用 `case list` 或读取其他用例。只有用户明确要求浏览、统计或搜索资产库时才使用 `casedock case list --json`；用户明确指定 Case ID 重测时只读取该 ID。
-
-## 创建全新用例
-
-`case create --input <JSON文件>` 接受不含 Case ID 的用例定义：
+也可使用 `--input -` 从 stdin 读取。清单示例：
 
 ```json
 {
   "schemaVersion": 1,
-  "title": "有效账号登录",
-  "tags": ["smoke"],
-  "preconditions": ["存在可用测试账号"],
-  "steps": [
+  "testCase": {
+    "title": "有效账号登录",
+    "tags": ["smoke"],
+    "preconditions": [
+      {
+        "description": "存在可用测试账号",
+        "satisfied": true,
+        "observation": "用户提供的账号成功登录"
+      }
+    ],
+    "steps": [
+      {
+        "action": "打开登录页并使用测试账号登录",
+        "assertions": [
+          { "expect": "进入工作台并显示账号名称", "evidence": ["screenshot"] }
+        ]
+      }
+    ]
+  },
+  "run": {
+    "initialUrl": "https://test.example/login",
+    "credentials": {
+      "account": "qa@example.test",
+      "password": "test-password"
+    },
+    "executor": {
+      "agent": "实际 Agent 名称",
+      "model": null,
+      "browserTool": "实际使用的工具",
+      "capabilities": ["screenshot"]
+    },
+    "startedAt": "2026-09-15T06:00:00.000Z",
+    "status": "completed",
+    "reason": "全部检查完成",
+    "tokenUsage": { "total": 12345, "source": "宿主显示的本次任务用量" }
+  },
+  "results": [
     {
-      "id": "submit-login",
-      "action": "打开登录页并使用测试账号登录",
+      "step": 1,
+      "status": "passed",
+      "observation": "已进入工作台，当前地址为 https://test.example/dashboard",
       "assertions": [
         {
-          "id": "dashboard-visible",
-          "expect": "进入工作台并显示账号名称",
-          "evidence": ["screenshot"]
+          "assertion": 1,
+          "verdict": "passed",
+          "observation": "工作台标题和账号名称可见",
+          "evidence": [".casedock/inbox/dashboard.png"]
         }
       ]
     }
@@ -42,80 +69,35 @@ casedock validate --json
 }
 ```
 
-CaseDock 自动返回唯一 `data.testCase.id` 和 `data.revision`。每个新场景都单独调用一次；禁止自行指定 Case ID，禁止先查询相似用例。`case save` 只用于用户明确要求修改已有用例：先 `case get`，再携带完整用例和当前 `expectedRevision` 保存。
+`step` 和 `assertion` 是从 1 开始的清单序号，不是 Agent 生成的 ID。CaseDock 自动生成所有稳定 ID。一个截图可以在多个断言的 `evidence` 中重复引用；CaseDock 会分别建立证据关联。截图支持 PNG/JPEG，单文件最多 20 MiB，路径必须相对于资产库且不能越界。
 
-## 开始运行
+步骤状态为 `passed / failed / blocked / skipped / error`，断言结论为 `passed / failed / inconclusive`。中断时将 `run.status` 设为 `interrupted` 并说明原因；未执行的步骤可以不出现在 `results` 中，最终结论会是 `inconclusive`。通过步骤必须包含全部断言，通过断言必须附上规定截图。
 
-`run start --input <JSON文件>`：
+`startedAt` 是开始实际测试时记录的 ISO 时间。`initialUrl` 始终保存用户最初提供的地址；测试账号和密码按原值明文记录，不需要登录时 `credentials` 传 `null`。只有宿主明确提供准确 Token 总量时才提交 `tokenUsage`，否则省略，禁止估算。
 
-```json
-{
-  "caseId": "case create 或 case get 返回的 ID",
-  "expectedRevision": "case create 或 case get 返回的完整 revision",
-  "initialUrl": "https://test.example/login",
-  "credentials": {
-    "account": "qa@example.test",
-    "password": "test-password"
-  },
-  "executor": {
-    "agent": "实际 Agent 名称",
-    "model": null,
-    "browserTool": "实际使用的工具",
-    "capabilities": ["screenshot"]
-  },
-  "preconditions": [
-    { "index": 0, "satisfied": true, "observation": "实际观察依据" }
-  ]
-}
+CaseDock 会先校验整份清单和全部截图，再发布用例与 Run；校验失败不会留下半成品。成功响应只包含 Case ID、Run ID、最终结论和资产路径。修正输入后可重新提交。每个新场景各调用一次；普通新测试不要调用 `case list` 或读取已有用例。
+
+## 初始化和查看
+
+```text
+casedock --root <目录> init --name <名称>
+casedock validate --json
+casedock run get <run-id> --json
+casedock open
 ```
 
-前置条件为空时传空数组。`initialUrl` 是用户最初提供、尚未发生页面跳转的 HTTP(S) 地址。测试账号与密码按用户提供的原值明文记录；不需要登录时 `credentials` 传 `null`。返回的 `data.id` 是 run ID；此命令只创建记录，不启动或控制浏览器。CaseDock 会自动记录开始时间。
+初始化生成 `casedock.yaml`、`cases/`、`runs/` 和临时 `.casedock/inbox/`。用 `casedock schema` 获取当前精确 Schema。
 
-## 证据和步骤结果
+## 明确指定 Case ID 的重测
 
-先把真实证据保存到 `.casedock/inbox/`，然后调用 `artifact add`：
+只有用户明确要求重测某个 Case ID 时，才执行：
 
-```json
-{
-  "runId": "run-id",
-  "stepId": "submit-login",
-  "assertionId": "dashboard-visible",
-  "kind": "screenshot",
-  "source": ".casedock/inbox/dashboard.png"
-}
+```text
+casedock case get <case-id> --json
+casedock run start --input <JSON文件>
+casedock artifact add --input <JSON文件>
+casedock run record --input <JSON文件>
+casedock run finish --input <JSON文件>
 ```
 
-支持 PNG 和 JPEG，单文件最多 20 MiB。页面文本、URL 等内容直接写入 observation，不创建文本附件。登记后使用返回的 artifact ID 提交步骤：
-
-```json
-{
-  "runId": "run-id",
-  "requestId": "login-submit-1",
-  "stepId": "submit-login",
-  "status": "passed",
-  "observation": "页面进入工作台",
-  "assertions": [
-    {
-      "assertionId": "dashboard-visible",
-      "verdict": "passed",
-      "observation": "账号名称和工作台标题可见",
-      "artifactIds": ["artifact-id"]
-    }
-  ]
-}
-```
-
-步骤状态为 `passed / failed / blocked / skipped / error`，断言结论为 `passed / failed / inconclusive`。同一 `requestId` 和相同内容可以安全重发；同一步骤不能换 ID 覆盖。
-
-## 结束和查看
-
-```json
-{
-  "runId": "run-id",
-  "status": "completed",
-  "reason": "全部检查完成",
-  "tokenUsage": { "total": 12345, "source": "宿主显示的本次任务用量" }
-}
-```
-
-通过 `run finish --input <文件>` 提交；CaseDock 根据开始和结束时间计算测试耗时。只有宿主明确提供本次测试的准确 Token 数量时才提交 `tokenUsage`，无法取得时省略，禁止估算。中断时将状态改为 `interrupted` 并说明原因。使用 `run list`、`run get <run-id>` 查看记录，使用 `casedock open` 打开本地页面。禁止手改 `runs/*/result.json`。
+这些增量命令保留现有用例 revision、步骤 ID 和断言 ID，详细字段以 `casedock schema` 为准。不要读取其他用例，不要覆盖历史 Run。普通新测试始终优先使用 `test submit`。

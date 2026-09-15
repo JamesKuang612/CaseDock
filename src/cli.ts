@@ -267,6 +267,12 @@ cli
     });
     if (result.errors.length) process.exitCode = 1;
   });
+const tests = cli.command('test').description('低成本提交 Agent 已完成的测试');
+tests
+  .command('submit')
+  .description('一次校验并保存新用例、执行结果和截图证据')
+  .requiredOption('--input <path>', 'JSON 文件，- 表示 stdin')
+  .action(async (options) => output(await (await store()).submitTest(await readInput(options))));
 const cases = cli.command('case').description('读取和维护测试用例');
 cases
   .command('create')

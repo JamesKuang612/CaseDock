@@ -98,6 +98,59 @@ test('CLI 通过 stdin 串联创建、执行记录、截图证据和结束，失
     await readFile(join(root, '.agents/skills/casedock-testing/SKILL.md'), 'utf8'),
     /CaseDock Browser 只是在当前 Agent 没有交互式浏览器工具时提供的可选兜底/,
   );
+  await writeFile(join(root, '.casedock/inbox/quick.png'), png);
+  const quick = call(['test', 'submit'], {
+    schemaVersion: 1,
+    testCase: {
+      title: '一次提交',
+      tags: [],
+      preconditions: [],
+      steps: [
+        {
+          action: '检查页面',
+          assertions: [{ expect: '页面可见', evidence: ['screenshot'] }],
+        },
+      ],
+    },
+    run: {
+      initialUrl: 'https://example.test',
+      credentials: null,
+      executor: {
+        agent: 'cli-test',
+        model: null,
+        browserTool: 'fixture',
+        capabilities: ['screenshot'],
+      },
+      startedAt: new Date(Date.now() - 1_000).toISOString(),
+      status: 'completed',
+      reason: '完成',
+    },
+    results: [
+      {
+        step: 1,
+        status: 'passed',
+        observation: '页面已显示',
+        assertions: [
+          {
+            assertion: 1,
+            verdict: 'passed',
+            observation: '截图可见',
+            evidence: ['.casedock/inbox/quick.png'],
+          },
+        ],
+      },
+    ],
+  });
+  assert.deepEqual(Object.keys(quick).sort(), [
+    'artifactCount',
+    'caseId',
+    'casePath',
+    'evidenceDirectory',
+    'runId',
+    'runPath',
+    'verdict',
+  ]);
+  assert.equal(quick.verdict, 'passed');
   const document = call(['case', 'create'], {
     schemaVersion: 1,
     title: 'CLI 测试',

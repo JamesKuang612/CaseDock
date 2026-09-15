@@ -1,6 +1,14 @@
 # CaseDock Browser 兜底
 
-仅当当前 Agent 没有能够点击、输入和截图的原生交互工具时读取本页。CaseDock Browser 是随 npm 包分发的官方 Playwright CLI 适配层，不负责理解用例、选择步骤或判断结果。
+仅当当前 Agent 没有能够点击、输入和截图的原生交互工具，并且用户已经明确选择使用 CaseDock Browser 时读取本页。CaseDock Browser 是随 npm 包分发的官方 Playwright CLI 适配层，不负责理解用例、选择步骤或判断结果。
+
+## 启用前询问
+
+若用户尚未在本次对话中选择兜底，先暂停测试并用简短、具体的话询问，例如：
+
+> 当前 Agent 没有已加载的交互式浏览器工具。更推荐先安装这个 Agent 官方支持的 Playwright MCP、浏览器插件或 Computer Use，通常操作更自然；安装后可能需要重启 Agent 或新开对话。你希望先暂停安装，还是继续使用 CaseDock Browser 兜底？
+
+等待用户答复，不要同时运行 `doctor`、安装浏览器或开始编写脚本。用户选择原生能力时，到此停止并等待其完成安装与重启。用户选择兜底，或确认宿主不支持扩展后，再继续下面的检查。同一对话只询问一次。
 
 ## 使用前检查
 
@@ -11,7 +19,7 @@ casedock doctor --json
 查看 `data.browserFallback.ready`：
 
 - `true`：可以直接使用下面的命令。
-- `false`：将 `data.browserFallback.installCommand` 原样告诉用户并等待授权。不要自行下载，不要改装其他 MCP 或测试产品。
+- `false`：将 `data.browserFallback.installCommand` 原样告诉用户并再次等待下载授权。选择使用兜底不等于授权下载浏览器；不要自行下载，不要改装其他 MCP 或测试产品。
 
 用户同意后安装 Chromium：
 
