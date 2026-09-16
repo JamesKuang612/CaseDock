@@ -1,4 +1,3 @@
-import { Image } from 'antd';
 import type { Run } from '../core/models';
 
 /** 将运行和步骤状态转换为测试人员使用的中文结果。 */
@@ -147,12 +146,20 @@ export function RunDetails({ run }: { run: Run }) {
                         if (!artifact) return null;
                         const url = `/api/runs/${run.id}/artifacts/${id}`;
                         return artifact.kind === 'screenshot' ? (
-                          <Image
+                          <a
+                            className="evidence-link"
+                            href={url}
                             key={id}
-                            src={url}
-                            alt={`${step.action}：${assertion.expect}`}
-                            width="100%"
-                          />
+                            target="_blank"
+                            rel="noreferrer"
+                            aria-label="在新窗口查看截图原图"
+                          >
+                            <img
+                              src={url}
+                              alt={`${step.action}：${assertion.expect}`}
+                              loading="lazy"
+                            />
+                          </a>
                         ) : null;
                       })}
                     </div>

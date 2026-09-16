@@ -9,7 +9,7 @@ const png = Buffer.from(
   'base64',
 );
 
-test('setup 一次初始化资产库并安装 Skill，重复执行不覆盖已有内容', async (t) => {
+test('Skill 运行器可以在空目录初始化资产库并完成环境诊断', async (t) => {
   const base = resolve('.casedock/cli-tests');
   await mkdir(base, { recursive: true });
   const root = await mkdtemp(join(base, 'setup-'));
@@ -17,20 +17,16 @@ test('setup 一次初始化资产库并安装 Skill，重复执行不覆盖已�
     assert.ok(relative(base, root).startsWith('setup-'));
     await rm(root, { recursive: true, force: true });
   });
-  const args = ['--import', 'tsx', 'src/cli.ts', '--root', root, 'setup', '--name', '团队测试资产'];
+  const args = ['--import', 'tsx', 'src/cli.ts', '--root', root, 'init', '--name', '团队测试资产'];
   const first = spawnSync(process.execPath, args, {
     cwd: process.cwd(),
     windowsHide: true,
     encoding: 'utf8',
   });
   assert.equal(first.status, 0, first.stderr);
-  assert.match(first.stdout, /CaseDock 测试资产库已准备完成/);
-  assert.match(first.stdout, /Skill：已安装/);
+  assert.match(first.stdout, /"ok": true/);
   assert.match(await readFile(join(root, 'casedock.yaml'), 'utf8'), /团队测试资产/);
   assert.match(await readFile(join(root, '.gitignore'), 'utf8'), /^\.casedock\/$/m);
-  const skillPath = join(root, '.agents/skills/casedock-testing/SKILL.md');
-  assert.match(await readFile(skillPath, 'utf8'), /CaseDock 测试资产记录/);
-
   const doctor = spawnSync(
     process.execPath,
     ['--import', 'tsx', 'src/cli.ts', '--root', root, 'doctor', '--json'],
@@ -47,15 +43,13 @@ test('setup 一次初始化资产库并安装 Skill，重复执行不覆盖已�
   assert.equal(diagnosis.browserFallback.cliAvailable, true);
   assert.equal(diagnosis.nativeAgentBrowser.detectable, false);
 
-  await writeFile(skillPath, '用户保留的 Skill\n');
   const second = spawnSync(process.execPath, args, {
     cwd: process.cwd(),
     windowsHide: true,
     encoding: 'utf8',
   });
   assert.equal(second.status, 0, second.stderr);
-  assert.match(second.stdout, /Skill：已存在，未覆盖/);
-  assert.equal(await readFile(skillPath, 'utf8'), '用户保留的 Skill\n');
+  assert.match(second.stdout, /"ok": true/);
 });
 
 test('CLI 通过 stdin 串联创建、执行记录、截图证据和结束，失败返回机器错误', async (t) => {
@@ -93,11 +87,6 @@ test('CLI 通过 stdin 串联创建、执行记录、截图证据和结束，失
     return envelope.data;
   }
   call(['init']);
-  call(['skill', 'install']);
-  assert.match(
-    await readFile(join(root, '.agents/skills/casedock-testing/SKILL.md'), 'utf8'),
-    /CaseDock Browser 只是在当前 Agent 没有交互式浏览器工具时提供的可选兜底/,
-  );
   await writeFile(join(root, '.casedock/inbox/quick.png'), png);
   const quick = call(['test', 'submit'], {
     schemaVersion: 1,

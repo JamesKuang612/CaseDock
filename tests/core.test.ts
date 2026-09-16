@@ -94,6 +94,15 @@ test('用例校验拒绝重复 ID 和未知字段，坏文件不会阻断其他�
   assert.equal(list.errors.length, 1);
 });
 
+test('运行列表忽略 .gitkeep 等非运行文件', async (t) => {
+  const { root, store } = await fixture(t);
+  await writeFile(join(root, 'runs/.gitkeep'), '');
+  await writeFile(join(root, 'runs/README.txt'), '辅助说明');
+
+  const list = await store.listRuns();
+  assert.deepEqual(list, { runs: [], errors: [] });
+});
+
 test('自动创建允许同名用例并生成互不重复的 Case ID', async (t) => {
   const { store, testCase } = await fixture(t);
   const { id: _id, ...definition } = testCase;
@@ -178,6 +187,119 @@ test('一次性提交在一条调用内生成用例、运行和全部截图关�
   assert.equal(run.steps.length, 1);
   assert.equal(run.artifacts.length, 2);
   assert.deepEqual((await store.readArtifact(run.id, run.artifacts[0]!.id)).bytes, png);
+});
+
+test('一次性提交保留原始测试输入 source，不传时向下兼容', async (t) => {
+  const { root, store } = await fixture(t);
+  await writeFile(join(root, '.casedock/inbox/shot.png'), png);
+  const sourceText = '测试步骤：\n1. 打开登录页\n预期：登录成功';
+  const base = {
+    schemaVersion: 1 as const,
+    testCase: {
+      title: '原始内容测试',
+      tags: [],
+      preconditions: [{ description: '账号可用', satisfied: true, observation: '可用' }],
+      steps: [
+        {
+          action: '登录',
+          assertions: [{ expect: '成功', evidence: ['screenshot' as const] }],
+        },
+      ],
+    },
+    run: {
+      initialUrl: 'https://example.test',
+      credentials: null,
+      executor: {
+        agent: 'test-agent',
+        model: null,
+        browserTool: 'fixture',
+        capabilities: ['screenshot' as const],
+      },
+      startedAt: new Date(Date.now() - 1_000).toISOString(),
+      status: 'completed' as const,
+      reason: '完成',
+    },
+    results: [
+      {
+        step: 1,
+        status: 'passed' as const,
+        observation: '已登录',
+        assertions: [
+          {
+            assertion: 1,
+            verdict: 'passed' as const,
+            observation: '成功',
+            evidence: ['.casedock/inbox/shot.png'],
+          },
+        ],
+      },
+    ],
+  };
+
+  // 传入 source 时保留到用例和快照
+  const withSource = await store.submitTest({
+    ...base,
+    testCase: { ...base.testCase, source: sourceText },
+  });
+  const tc = await store.getCase(withSource.caseId);
+  assert.equal(tc.testCase.source, sourceText);
+  const run = await store.getRun(withSource.runId);
+  assert.equal(run.snapshot.source, sourceText);
+
+  // 不传 source 时向下兼容
+  await writeFile(join(root, '.casedock/inbox/shot2.png'), png);
+  const withoutSource = await store.submitTest({
+    ...base,
+    results: [
+      {
+        ...base.results[0]!,
+        assertions: [
+          {
+            ...base.results[0]!.assertions[0]!,
+            evidence: ['.casedock/inbox/shot2.png'],
+          },
+        ],
+      },
+    ],
+  });
+  const tc2 = await store.getCase(withoutSource.caseId);
+  assert.equal(tc2.testCase.source, undefined);
+});
+
+test('source 超过 50000 字符时校验报错', async (t) => {
+  const { store } = await fixture(t);
+  await assert.rejects(
+    store.submitTest({
+      schemaVersion: 1,
+      testCase: {
+        title: '超长原始内容',
+        source: 'x'.repeat(50001),
+        tags: [],
+        preconditions: [],
+        steps: [
+          {
+            action: '操作',
+            assertions: [{ expect: '预期', evidence: ['screenshot'] }],
+          },
+        ],
+      },
+      run: {
+        initialUrl: 'https://example.test',
+        credentials: null,
+        executor: {
+          agent: 'test-agent',
+          model: null,
+          browserTool: 'fixture',
+          capabilities: ['screenshot'],
+        },
+        startedAt: new Date(Date.now() - 1_000).toISOString(),
+        status: 'completed',
+        reason: '完成',
+      },
+      results: [],
+    }),
+    code('VALIDATION'),
+  );
 });
 
 test('一次性提交在证据或结构无效时不留下半成品资产', async (t) => {

@@ -201,28 +201,37 @@ export function App() {
 
             <section className="panel case-definition">
               <h2>用例内容</h2>
-              {selectedCase.testCase.preconditions.length > 0 && (
-                <div className="preconditions">
-                  <h3>前置条件</h3>
-                  <ul>
-                    {selectedCase.testCase.preconditions.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
+              {selectedCase.testCase.source && (
+                <div className="source-block">
+                  <h3>原始内容</h3>
+                  <div className="source-content">{selectedCase.testCase.source}</div>
                 </div>
               )}
-              <div className="definition-steps">
-                {selectedCase.testCase.steps.map((step, index) => (
-                  <div className="definition-step" key={step.id}>
-                    <span className="step-number">{index + 1}</span>
-                    <div>
-                      <strong>{step.action}</strong>
-                      {step.assertions.map((assertion) => (
-                        <p key={assertion.id}>{assertion.expect}</p>
+              <div className={selectedCase.testCase.source ? 'parsed-block' : ''}>
+                {selectedCase.testCase.source && <h3>用例结构</h3>}
+                {selectedCase.testCase.preconditions.length > 0 && (
+                  <div className="preconditions">
+                    <h3>前置条件</h3>
+                    <ul>
+                      {selectedCase.testCase.preconditions.map((item) => (
+                        <li key={item}>{item}</li>
                       ))}
-                    </div>
+                    </ul>
                   </div>
-                ))}
+                )}
+                <div className="definition-steps">
+                  {selectedCase.testCase.steps.map((step, index) => (
+                    <div className="definition-step" key={step.id}>
+                      <span className="step-number">{index + 1}</span>
+                      <div>
+                        <strong>{step.action}</strong>
+                        {step.assertions.map((assertion) => (
+                          <p key={assertion.id}>{assertion.expect}</p>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </section>
 

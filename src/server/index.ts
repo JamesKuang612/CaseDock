@@ -73,8 +73,14 @@ export async function createServer(root = process.cwd(), development = false, st
         .send(bytes);
     },
   );
-  // 打包后的 CLI 与 ui 目录相邻；开发模式由 Vite 提供页面。
-  const uiRoot = staticRoot ?? fileURLToPath(new URL('./ui/', import.meta.url));
+  // 源码构建时页面与运行器相邻；Skill 分发时页面位于 ../assets/ui。
+  const candidates = [
+    staticRoot,
+    fileURLToPath(new URL('./ui/', import.meta.url)),
+    fileURLToPath(new URL('../assets/ui/', import.meta.url)),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+  const uiRoot =
+    candidates.find((candidate) => existsSync(resolve(candidate, 'index.html'))) ?? candidates[0];
   if (existsSync(resolve(uiRoot, 'index.html')))
     await server.register(fastifyStatic, { root: uiRoot });
   else

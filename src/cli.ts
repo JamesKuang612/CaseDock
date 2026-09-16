@@ -1,22 +1,12 @@
 #!/usr/bin/env node
-import { cp } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { Command, InvalidArgumentError } from 'commander';
 import open from 'open';
 import { createServer } from './server/index.js';
 import { createStore } from './core/store.js';
 import { CoreError, schemas } from './core/schema.js';
-import { findWorkspace, isFsError, readBounded, safePath } from './core/files.js';
-import { inspectBrowserFallback, runBundledBrowser } from './browser/adapter.js';
-
-const defaultSkillTarget = '.agents/skills/casedock-testing';
-
-interface SkillInstallation {
-  source: string;
-  path: string;
-  status: 'installed' | 'existing';
-}
+import { findWorkspace, readBounded } from './core/files.js';
+import { inspectBrowserFallback, runBrowserFallback } from './browser/adapter.js';
 
 /** 校验本地服务端口，防止把非法输入传入网络监听。 */
 function parsePort(value: string) {
@@ -49,54 +39,6 @@ function output(data: unknown) {
   console.log(JSON.stringify({ apiVersion: 1, ok: true, data }, null, 2));
 }
 
-/** 安装随 npm 包分发的 Skill；setup 重复运行时保留用户已有版本。 */
-async function installBundledSkill(
-  root: string,
-  target: string,
-  preserveExisting = false,
-): Promise<SkillInstallation> {
-  const normalizedTarget = target.replace(/[\\/]+$/, '');
-  const source = fileURLToPath(new URL('../skills/casedock-testing/', import.meta.url));
-  const destination = await safePath(root, normalizedTarget);
-  if (preserveExisting) {
-    try {
-      await readBounded(await safePath(root, `${normalizedTarget}/SKILL.md`));
-      return { source, path: normalizedTarget, status: 'existing' };
-    } catch (error) {
-      if (!isFsError(error, 'ENOENT')) throw error;
-    }
-  }
-  try {
-    await cp(source, destination, { recursive: true, errorOnExist: true, force: false });
-  } catch (error) {
-    if (isFsError(error, 'EEXIST') || (error as NodeJS.ErrnoException).code === 'ERR_FS_CP_EEXIST')
-      throw new CoreError('CONFLICT', '目标 Skill 已存在；请先审阅并自行合并更新');
-    throw error;
-  }
-  return { source, path: normalizedTarget, status: 'installed' };
-}
-
-/** 输出面向首次使用者的 setup 结果和唯一必要的下一步操作。 */
-function outputSetup(
-  workspace: { root: string; casesDirectory: string; runsDirectory: string },
-  skillInstallation: SkillInstallation,
-) {
-  const skillStatus = skillInstallation.status === 'installed' ? '已安装' : '已存在，未覆盖';
-  console.log(
-    [
-      'CaseDock 测试资产库已准备完成',
-      '',
-      `资产目录：${workspace.root}`,
-      `Skill：${skillStatus}（${skillInstallation.path}）`,
-      `用例目录：${workspace.casesDirectory}/`,
-      `执行目录：${workspace.runsDirectory}/`,
-      '',
-      '现在可以在该目录打开 Agent，并要求它使用 CaseDock 执行测试。',
-      '首次测试前可运行 casedock doctor 检查浏览器兜底。',
-    ].join('\n'),
-  );
-}
-
 const cli = new Command()
   .name('casedock')
   .description('CaseDock — 跨 Agent 的测试资产与证据工作台')
@@ -117,7 +59,7 @@ async function store() {
   return repository;
 }
 
-/** 检查当前目录能否识别资产库；doctor 不因尚未 setup 而整体失败。 */
+/** 检查当前目录能否识别资产库；doctor 不因尚未初始化而整体失败。 */
 async function inspectWorkspace() {
   try {
     const root = await workspaceRoot();
@@ -152,8 +94,8 @@ cli
       const workspace = result.workspace.ready
         ? `可用（${result.workspace.root}）`
         : `不可用（${result.workspace.detail}）`;
-      const browser = result.browserFallback.ready
-        ? `可用（Playwright CLI ${result.browserFallback.cliVersion}）`
+      const browser = result.browserFallback.cliAvailable
+        ? '可按需启用（首次使用会下载 Playwright 与 Chromium）'
         : `不可用（${result.browserFallback.detail}）`;
       console.log(
         [
@@ -163,9 +105,9 @@ cli
           `CaseDock Browser：${browser}`,
           'Agent 原生浏览器：请由当前 Agent 根据已加载工具判断',
           '',
-          result.browserFallback.ready
-            ? '浏览器兜底已准备完成。'
-            : `安装命令：${result.browserFallback.installCommand}`,
+          result.browserFallback.cliAvailable
+            ? `用户确认使用兜底后再执行：${result.browserFallback.installCommand}`
+            : '请安装 Node.js 22+（含 npx），或改用 Agent 原生浏览器工具。',
         ].join('\n'),
       );
     }
@@ -173,13 +115,13 @@ cli
 
 cli
   .command('browser [args...]')
-  .description('调用随包分发的可见 Playwright CLI；仅在 Agent 没有更合适的原生工具时使用')
+  .description('按需调用可见 Playwright CLI；仅在用户明确接受 CaseDock 兜底后使用')
   .helpOption(false)
   .allowUnknownOption(true)
   .allowExcessArguments(true)
   .passThroughOptions()
   .action(async (args: string[]) => {
-    const code = await runBundledBrowser(args);
+    const code = await runBrowserFallback(args);
     if (code !== 0) process.exitCode = code;
   });
 
@@ -213,18 +155,6 @@ cli
     },
   );
 cli
-  .command('setup')
-  .description('一次完成测试资产库初始化和 Skill 安装')
-  .option('--name <name>', '资产库显示名称')
-  .option('--target <path>', '资产库内的 Skill 目标目录', defaultSkillTarget)
-  .action(async (options: { name?: string; target: string }) => {
-    const root = await workspaceRoot(true);
-    const repository = await createStore(root);
-    const workspace = await repository.init(options.name);
-    const installation = await installBundledSkill(root, options.target, true);
-    outputSetup(workspace, installation);
-  });
-cli
   .command('init')
   .description('将当前目录初始化为独立测试资产库')
   .option('--name <name>', '资产库显示名称')
@@ -232,23 +162,6 @@ cli
     const repository = await createStore(await workspaceRoot(true));
     output(await repository.init(options.name));
   });
-const skill = cli.command('skill').description('安装或定位 CaseDock 测试记录 Skill');
-skill
-  .command('install')
-  .description('将 Skill 安装到当前资产库的开放 Agent Skills 目录')
-  .option('--target <path>', '资产库内的目标目录', defaultSkillTarget)
-  .action(async (options: { target: string }) => {
-    const root = await workspaceRoot();
-    output(await installBundledSkill(root, options.target));
-  });
-skill
-  .command('path')
-  .description('输出安装包内的 Skill 路径')
-  .action(() =>
-    output({
-      path: fileURLToPath(new URL('../skills/casedock-testing/SKILL.md', import.meta.url)),
-    }),
-  );
 cli
   .command('schema')
   .description('输出所有输入和资产的 JSON Schema')

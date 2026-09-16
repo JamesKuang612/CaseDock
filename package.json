@@ -1,6 +1,7 @@
 {
   "name": "casedock",
   "version": "0.1.0-beta.2",
+  "private": true,
   "description": "跨 Agent 的本地测试资产与证据工作台",
   "license": "MIT",
   "repository": {
@@ -19,41 +20,29 @@
     "local-first"
   ],
   "type": "module",
-  "bin": {
-    "casedock": "build/cli.js"
-  },
-  "files": [
-    "build",
-    "skills",
-    "examples/sample-workspace",
-    "README.md",
-    "LICENSE"
-  ],
   "engines": {
     "node": ">=22"
-  },
-  "publishConfig": {
-    "access": "public"
   },
   "scripts": {
     "dev": "concurrently -k -n api,ui \"npm:dev:api\" \"npm:dev:ui\"",
     "dev:api": "tsx watch src/cli.ts --root examples/sample-workspace open --port 4310 --no-open --dev",
     "dev:ui": "vite",
     "typecheck": "tsc --noEmit",
-    "build": "npm run typecheck && tsup && vite build",
-    "start": "node build/cli.js --root examples/sample-workspace open",
+    "build:runner": "tsup",
+    "build:ui": "vite build",
+    "build:skill": "node scripts/package-skill.mjs",
+    "build": "npm run typecheck && npm run build:runner && npm run build:ui && npm run build:skill",
+    "start": "node skills/casedock-testing/scripts/casedock.mjs --root examples/sample-workspace open",
     "test": "node --import tsx --test tests/*.test.ts",
+    "test:skill": "node --import tsx --test tests/distribution/skill.e2e.ts",
     "test:e2e": "npm run build && node --import tsx --test tests/*.e2e.ts",
-    "format": "prettier --write src tests vite.config.ts tsup.config.ts",
-    "format:check": "prettier --check src tests vite.config.ts tsup.config.ts",
-    "check": "npm run format:check && npm run test && npm run build",
-    "prepack": "npm run check"
+    "format": "prettier --write src tests scripts vite.config.ts tsup.config.ts",
+    "format:check": "prettier --check src tests scripts vite.config.ts tsup.config.ts",
+    "check": "npm run format:check && npm run test && npm run build && npm run test:skill"
   },
   "dependencies": {
     "@fastify/static": "10.1.3",
-    "@playwright/cli": "0.1.20",
     "ajv": "8.20.0",
-    "antd": "6.6.3",
     "commander": "15.0.0",
     "fastify": "5.12.4",
     "open": "11.0.3",

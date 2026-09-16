@@ -2,6 +2,11 @@
 schemaVersion: 1
 id: casedock-workbench
 title: 示例：CaseDock 测试资产查看
+source: |-
+  打开 CaseDock 本地查看页面，确认用例列表和详情页展示正常。
+  1. 打开初始地址，查看用例列表
+  2. 点击某个用例，查看详情页
+  预期：列表和详情都能正确展示
 tags:
   - example
   - smoke

@@ -33,11 +33,13 @@ function object(properties: Record<string, unknown>, optional: string[] = []) {
 function array(items: unknown, minItems = 0, maxItems = 1000) {
   return { type: 'array', items, minItems, maxItems };
 }
+const sourceText = { type: 'string', minLength: 1, maxLength: 50000, pattern: '\\S' };
 /** 创建用例主体字段，供自动创建输入与完整用例共用同一约束。 */
 function testCaseProperties(evidence: unknown) {
   return {
     schemaVersion: { const: 1 },
     title: text,
+    source: sourceText,
     tags: { ...array(text), uniqueItems: true },
     preconditions: array(text),
     steps: array(
@@ -53,8 +55,8 @@ function testCaseProperties(evidence: unknown) {
     ),
   };
 }
-export const caseSchema = object({ id, ...testCaseProperties(screenshotEvidence) });
-const legacyCaseSchema = object({ id, ...testCaseProperties(legacyEvidence) });
+export const caseSchema = object({ id, ...testCaseProperties(screenshotEvidence) }, ['source']);
+const legacyCaseSchema = object({ id, ...testCaseProperties(legacyEvidence) }, ['source']);
 /** 创建执行器 Schema；历史 Run 保留早期文本能力标记。 */
 function executorSchema(evidence: unknown) {
   return object({
@@ -103,7 +105,7 @@ const artifactProperties = {
 export const schemas = {
   workspace: object({ schemaVersion: { const: 1 }, name: text }),
   testCase: caseSchema,
-  createCase: object(testCaseProperties(screenshotEvidence)),
+  createCase: object(testCaseProperties(screenshotEvidence), ['source']),
   saveCase: object({ testCase: caseSchema, expectedRevision: { anyOf: [hash, { type: 'null' }] } }),
   startRun: object({
     caseId: id,
@@ -134,30 +136,34 @@ export const schemas = {
   ),
   submitTest: object({
     schemaVersion: { const: 1 },
-    testCase: object({
-      title: text,
-      tags: { ...array(text), uniqueItems: true },
-      preconditions: array(
-        object({
-          description: text,
-          satisfied: { type: 'boolean' },
-          observation: text,
-        }),
-      ),
-      steps: array(
-        object({
-          action: text,
-          assertions: array(
-            object({
-              expect: text,
-              evidence: { ...array(screenshotEvidence), uniqueItems: true },
-            }),
-            1,
-          ),
-        }),
-        1,
-      ),
-    }),
+    testCase: object(
+      {
+        title: text,
+        source: sourceText,
+        tags: { ...array(text), uniqueItems: true },
+        preconditions: array(
+          object({
+            description: text,
+            satisfied: { type: 'boolean' },
+            observation: text,
+          }),
+        ),
+        steps: array(
+          object({
+            action: text,
+            assertions: array(
+              object({
+                expect: text,
+                evidence: { ...array(screenshotEvidence), uniqueItems: true },
+              }),
+              1,
+            ),
+          }),
+          1,
+        ),
+      },
+      ['source'],
+    ),
     run: object(
       {
         initialUrl: text,

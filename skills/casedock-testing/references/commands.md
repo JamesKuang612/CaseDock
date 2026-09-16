@@ -1,28 +1,35 @@
-# CaseDock CLI 接口
+# CaseDock 运行器接口
 
-仅在准备保存测试资产时阅读本页。已安装版本使用 `casedock`；在 CaseDock 源码仓库开发时使用 `node build/cli.js`。通过 `--root <目录>` 可显式指定资产库，否则 CLI 从当前目录向上寻找 `casedock.yaml`。
+仅在准备保存测试资产时读取。将 Skill 目录内的运行器记为：
+
+```text
+RUNNER=node "<skill-root>/scripts/casedock.mjs"
+```
+
+下文的 `<RUNNER>` 均表示这条命令。不要依赖全局 `casedock`，也不要运行 `npm install`。所有命令可用 `--root <资产目录>` 显式指定资产库。
 
 ## 新测试：一次提交
 
-把本场景截图保存到资产库的 `.casedock/inbox/`，再将一份 JSON 清单交给：
+将截图保存到资产库 `.casedock/inbox/`，把单个场景整理成 JSON 清单，然后执行：
 
 ```text
-casedock test submit --input .casedock/inbox/submit.json
+<RUNNER> --root <资产目录> test submit --input <清单路径>
 ```
 
-也可使用 `--input -` 从 stdin 读取。清单示例：
+也可用 `--input -` 从 stdin 读取。推荐写临时 JSON 文件，避免 shell 转义。示例：
 
 ```json
 {
   "schemaVersion": 1,
   "testCase": {
     "title": "有效账号登录",
+    "source": "（可选）用户给出的原始测试描述原文，保留换行和格式",
     "tags": ["smoke"],
     "preconditions": [
       {
         "description": "存在可用测试账号",
         "satisfied": true,
-        "observation": "用户提供的账号成功登录"
+        "observation": "用户提供了可用的测试账号"
       }
     ],
     "steps": [
@@ -69,35 +76,35 @@ casedock test submit --input .casedock/inbox/submit.json
 }
 ```
 
-`step` 和 `assertion` 是从 1 开始的清单序号，不是 Agent 生成的 ID。CaseDock 自动生成所有稳定 ID。一个截图可以在多个断言的 `evidence` 中重复引用；CaseDock 会分别建立证据关联。截图支持 PNG/JPEG，单文件最多 20 MiB，路径必须相对于资产库且不能越界。
+`step` 和 `assertion` 是从 1 开始的清单序号。CaseDock 自动生成唯一 Case ID、Run ID、步骤 ID 和断言 ID。一个截图可以被多个断言引用；支持 PNG/JPEG，单文件最多 20 MiB，路径必须位于资产库内。
 
-步骤状态为 `passed / failed / blocked / skipped / error`，断言结论为 `passed / failed / inconclusive`。中断时将 `run.status` 设为 `interrupted` 并说明原因；未执行的步骤可以不出现在 `results` 中，最终结论会是 `inconclusive`。通过步骤必须包含全部断言，通过断言必须附上规定截图。
+步骤状态：`passed / failed / blocked / skipped / error`。断言结论：`passed / failed / inconclusive`。中断时将 `run.status` 设为 `interrupted` 并填写原因。通过步骤必须包含全部断言，通过断言必须附上要求的截图。
 
-`startedAt` 是开始实际测试时记录的 ISO 时间。`initialUrl` 始终保存用户最初提供的地址；测试账号和密码按原值明文记录，不需要登录时 `credentials` 传 `null`。只有宿主明确提供准确 Token 总量时才提交 `tokenUsage`，否则省略，禁止估算。
+`startedAt` 是实际测试开始时间。`initialUrl` 始终是用户提供的初始地址；测试账号和密码按原值明文记录，不需要登录时传 `null`。仅在宿主提供准确 Token 总量时提交 `tokenUsage`。
 
-CaseDock 会先校验整份清单和全部截图，再发布用例与 Run；校验失败不会留下半成品。成功响应只包含 Case ID、Run ID、最终结论和资产路径。修正输入后可重新提交。每个新场景各调用一次；普通新测试不要调用 `case list` 或读取已有用例。
+提交前会统一验证清单和截图；失败不会留下半成品。成功响应只返回 Case ID、Run ID、结论与资产路径。批量测试时每个新场景各提交一次，普通新测试不要调用 `case list`。
 
-## 初始化和查看
+## 初始化、校验和查看
 
 ```text
-casedock --root <目录> init --name <名称>
-casedock validate --json
-casedock run get <run-id> --json
-casedock open
+<RUNNER> --root <资产目录> init --name <名称>
+<RUNNER> --root <资产目录> validate --json
+<RUNNER> --root <资产目录> run get <run-id> --json
+<RUNNER> --root <资产目录> open
 ```
 
-初始化生成 `casedock.yaml`、`cases/`、`runs/` 和临时 `.casedock/inbox/`。用 `casedock schema` 获取当前精确 Schema。
+用 `<RUNNER> schema` 获取当前精确 Schema。
 
 ## 明确指定 Case ID 的重测
 
 只有用户明确要求重测某个 Case ID 时，才执行：
 
 ```text
-casedock case get <case-id> --json
-casedock run start --input <JSON文件>
-casedock artifact add --input <JSON文件>
-casedock run record --input <JSON文件>
-casedock run finish --input <JSON文件>
+<RUNNER> --root <资产目录> case get <case-id> --json
+<RUNNER> --root <资产目录> run start --input <JSON文件>
+<RUNNER> --root <资产目录> artifact add --input <JSON文件>
+<RUNNER> --root <资产目录> run record --input <JSON文件>
+<RUNNER> --root <资产目录> run finish --input <JSON文件>
 ```
 
-这些增量命令保留现有用例 revision、步骤 ID 和断言 ID，详细字段以 `casedock schema` 为准。不要读取其他用例，不要覆盖历史 Run。普通新测试始终优先使用 `test submit`。
+这些命令保留原用例 revision、步骤 ID 和断言 ID，并新增不可覆盖的 Run。字段以 `<RUNNER> schema` 为准。不要读取其他用例。

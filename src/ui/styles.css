@@ -249,6 +249,29 @@ small {
   line-height: 1.8;
 }
 
+.source-block {
+  margin-bottom: 24px;
+}
+
+.source-content {
+  margin-top: 10px;
+  padding: 16px 18px;
+  border-left: 3px solid #c8d5cd;
+  border-radius: 0 8px 8px 0;
+  background: #f4f7f5;
+  color: #48544d;
+  font-size: 13px;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.parsed-block {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid #edf0ee;
+}
+
 .definition-steps {
   display: grid;
   gap: 0;
@@ -477,8 +500,12 @@ small {
   margin-top: 16px;
 }
 
-.evidence-grid .ant-image,
+.evidence-link {
+  display: block;
+}
+
 .evidence-grid img {
+  display: block;
   width: 100%;
   border-radius: 7px;
 }

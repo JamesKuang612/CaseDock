@@ -42,10 +42,14 @@ function gitContext(root: string): Run['git'] {
   }
 }
 
+/** 判断字符串是否符合业务 ID 规则，供读取入口和目录枚举复用。 */
+function isId(id: string) {
+  return /^[a-z0-9][a-z0-9-]{0,79}$/.test(id);
+}
+
 /** 验证作为文件名使用的业务 ID，禁止路径片段和特殊字符。 */
 function checkId(id: string) {
-  if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(id))
-    throw new CoreError('VALIDATION', 'ID 只能包含小写字母、数字和连字符');
+  if (!isId(id)) throw new CoreError('VALIDATION', 'ID 只能包含小写字母、数字和连字符');
 }
 
 /** 识别截图真实格式并返回归档所需的扩展名与 MIME，不相信源文件后缀。 */
@@ -254,7 +258,11 @@ export class Store {
   async listRuns() {
     const runs: RunSummary[] = [];
     const errors: { path: string; message: string }[] = [];
-    for (const name of await this.names('runs', '')) {
+    // runs 目录允许保留 .gitkeep 等仓库辅助文件，只读取由 CaseDock 生成的运行目录。
+    const names = (await this.names('runs', '')).filter(
+      (name) => name.startsWith('run-') && isId(name),
+    );
+    for (const name of names) {
       try {
         const run = await this.getRun(name);
         const {
@@ -485,6 +493,7 @@ export class Store {
         schemaVersion: 1,
         id: caseId,
         title: value.testCase.title,
+        ...(value.testCase.source != null ? { source: value.testCase.source } : {}),
         tags: value.testCase.tags,
         preconditions: value.testCase.preconditions.map((item) => item.description),
         steps: value.testCase.steps.map((step, stepIndex) => ({

@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
-import { inspectBrowserFallback, normalizeBrowserArguments } from '../src/browser/adapter.js';
+import {
+  browserProcessArguments,
+  inspectBrowserFallback,
+  normalizeBrowserArguments,
+} from '../src/browser/adapter.js';
 
 test('浏览器兜底保留 Agent 参数并默认启用可见模式', () => {
   assert.deepEqual(normalizeBrowserArguments([]), ['--help']);
@@ -19,24 +22,20 @@ test('浏览器兜底保留 Agent 参数并默认启用可见模式', () => {
   ]);
 });
 
-test('浏览器诊断能定位随 CaseDock 分发的 Playwright CLI', () => {
+test('浏览器诊断只检查 npx，不会提前下载浏览器', () => {
   const status = inspectBrowserFallback();
   assert.equal(status.cliAvailable, true);
-  assert.match(status.cliVersion ?? '', /^0\.1\./);
-  assert.equal(status.ready, status.chromiumInstalled);
-  assert.match(status.installCommand, /^casedock browser install-browser chromium$/);
+  assert.equal(status.cliVersion, null);
+  assert.equal(status.ready, false);
+  assert.equal(status.chromiumInstalled, false);
+  assert.equal(status.requiresDownload, true);
+  assert.match(status.installCommand, /^node .+ browser install-browser chromium$/);
 });
 
-test('browser 命令将参数转发给包内 Playwright CLI', () => {
-  const result = spawnSync(
-    process.execPath,
-    ['--import', 'tsx', 'src/cli.ts', 'browser', '--version'],
-    {
-      cwd: process.cwd(),
-      windowsHide: true,
-      encoding: 'utf8',
-    },
-  );
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /^0\.1\.20\s*$/);
+test('browser 命令固定官方 CLI 版本并保留 Agent 参数', () => {
+  assert.deepEqual(browserProcessArguments(['snapshot']), [
+    '--yes',
+    '@playwright/cli@0.1.20',
+    'snapshot',
+  ]);
 });

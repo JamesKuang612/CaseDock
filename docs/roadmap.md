@@ -1,38 +1,34 @@
-# CaseDock POC 路线图
+# CaseDock 路线图
 
-## POC：跨目录测试资产闭环
+## P0：自包含 Skill
 
-- [x] 工具源码与用户测试资产目录解耦。
-- [x] 使用 `casedock.yaml` 标识并自动发现资产库。
-- [x] 用例保存在 `cases/`，运行快照、结果和最终证据保存在 `runs/`。
-- [x] `.casedock/` 仅保存临时数据。
-- [x] 本地编辑器可打开任意资产库。
-- [x] Skill 明确只约束输出，不控制 Agent 执行方式。
-- [x] CLI 可将 Skill 安装到仓库级 Agent Skills 目录。
-- [x] 新场景自动生成唯一 Case ID，不扫描或语义复用已有用例。
-- [x] 用一个完全独立的临时 Git 仓库完成端到端打包验收。
-- [x] `casedock setup` 一次完成资产库初始化、忽略规则和 Skill 安装。
-- [x] npm 发布元数据与本地 `.tgz` 安装验收。
-- [x] 提供可选的可见 CaseDock Browser CLI，作为 Agent 原生交互能力缺失时的兜底。
-- [x] 增加资产库与浏览器兜底诊断，并在 Skill 中定义快速止损规则。
-- [x] 普通新测试支持一次提交用例、结果和截图，避免 Agent 编排完整记录生命周期。
-- [x] 原生交互能力缺失时先让用户选择安装宿主生态或使用 CaseDock Browser 兜底。
+- [x] 源码工具与用户测试资产目录分离。
+- [x] 用例、运行快照、结果和最终证据使用普通文件保存。
+- [x] 本地只读页面展示用例、执行详情和截图。
+- [x] 新场景生成唯一 Case ID，不扫描或语义复用已有用例。
+- [x] 普通新测试通过一次 `test submit` 原子保存，降低 Agent 编排成本。
+- [x] Skill 明确只约束保存，不控制测试执行。
+- [x] 原生交互能力缺失时先由用户选择安装宿主生态或使用兜底。
+- [x] 将 Core、CLI、HTTP 服务和页面装配进一个可复制的 Skill 目录。
+- [x] 用户使用不再依赖全局 npm 包和 `casedock setup`。
+- [x] Playwright 改为用户授权后的按需依赖，不增加普通安装体积。
+- [x] 完整 Skill 在没有源码和 `node_modules` 的目录中通过隔离验收。
 
-## 下一阶段：真实用户输入
+## P1：真实团队体验
 
-- Excel/CSV 批量用例规范化与来源追踪。
-- 草稿、人工已审阅、已执行版本的状态表达。
-- 继续用真实 Agent 评估一次提交清单的生成稳定性和耗时。
-- 用两种不同 Agent 执行相同资产并比较输出兼容性。
-- 验证 Agent 原生浏览器优先和 CaseDock Browser 兜底两条链路的耗时与可见性。
-- Git diff 和可选 Git LFS 引导。
+- 用不同 Agent、不同模型执行相同测试，持续度量“测试本身”和“保存阶段”的耗时。
+- 验证仓库级 Skill 在 Codex、OpenCode、Claude、Antigravity 和 WorkBuddy 中的发现方式。
+- 改进 Excel/CSV 批量场景的来源文件、工作表和行号追踪。
+- 增加草稿、人工已审阅、已执行版本的状态表达。
+- 提供面向完全新人的 Skill 安装说明与故障诊断。
+- 评估团队仓库中的 Git diff 和 Git LFS 使用体验。
 
-## 可选增强
+## P2：薄适配与知识资产
 
-- MCP Core 适配层。
-- npm Registry 正式发布和多宿主 Skill 安装器。
-- 可复用模块和变量引用。
-- 运行包导入导出。
-- 外部证据存储与团队汇总。
+- MCP 作为 Core 的薄适配层，提供结构化工具发现，不接管测试。
+- 简道云等内部产品知识以独立、按需加载的参考 Skill 或知识包维护。
+- 可复用模块、变量和公共前置条件引用。
+- 运行包导入导出与跨团队聚合。
+- 外部证据对象存储。
 
-不会加入模型 SDK、Agent loop、定位决策或自动测试修复。CaseDock Browser 只维持官方 Playwright CLI 的可见会话与机械操作，不承担 Web Agent Harness 职责。
+不会加入模型 SDK、Agent loop、定位决策或自动测试修复。CaseDock Browser 只维持官方 Playwright CLI 的可见持续会话与机械操作。

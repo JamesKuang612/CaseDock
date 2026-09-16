@@ -20,6 +20,7 @@ test('只读页面从用例列表进入详情并展示执行证据', async (t) =
   const document = await store.createCase({
     schemaVersion: 1,
     title: '工作台基本流程',
+    source: '测试用户原始输入：\n1. 打开工作台\n预期：显示测试用例',
     tags: [],
     preconditions: ['服务已经启动'],
     steps: [
@@ -117,6 +118,9 @@ test('只读页面从用例列表进入详情并展示执行证据', async (t) =
   );
   await expect(page.getByText(document.testCase.id, { exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: '用例内容' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '原始内容' })).toBeVisible();
+  await expect(page.getByText('测试用户原始输入：')).toBeVisible();
+  await expect(page.getByRole('heading', { name: '用例结构' })).toBeVisible();
   await expect(page.getByRole('listitem').filter({ hasText: '服务已经启动' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '执行详情' })).toBeVisible();
   await expect(page.getByText('Token 消耗', { exact: true }).first()).toBeVisible();

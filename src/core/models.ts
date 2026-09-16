@@ -19,6 +19,7 @@ export interface TestCase {
   schemaVersion: 1;
   id: string;
   title: string;
+  source?: string;
   tags: string[];
   preconditions: string[];
   steps: TestStep[];
@@ -90,6 +91,7 @@ export interface SubmitTestInput {
   schemaVersion: 1;
   testCase: {
     title: string;
+    source?: string;
     tags: string[];
     preconditions: {
       description: string;
