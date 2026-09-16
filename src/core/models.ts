@@ -34,11 +34,20 @@ export interface SaveCaseInput {
   testCase: TestCase;
   expectedRevision: string | null;
 }
+/** 单套测试凭据，支持可选的角色或用途说明。 */
+export interface CredentialItem {
+  account: string;
+  password: string;
+  role?: string;
+}
+/** 测试账密类型：支持单套凭据对象、多套凭据数组或无凭据。 */
+export type Credentials = CredentialItem | CredentialItem[] | null;
+
 export interface StartRunInput {
   caseId: string;
   expectedRevision: string;
   initialUrl: string;
-  credentials: { account: string; password: string } | null;
+  credentials: Credentials;
   executor: {
     agent: string;
     model: string | null;

@@ -55635,8 +55635,9 @@ function executorSchema(evidence) {
 }
 var executor = executorSchema(screenshotEvidence);
 var legacyExecutor = executorSchema(legacyEvidence);
+var singleCredential = object({ account: text, password: text, role: text }, ["role"]);
 var credentials = {
-  anyOf: [object({ account: text, password: text }), { type: "null" }]
+  anyOf: [singleCredential, array(singleCredential, 1, 20), { type: "null" }]
 };
 var preconditions = array(
   object({

@@ -35,13 +35,27 @@ test('只读页面从用例列表进入详情并展示执行证据', async (t) =
           },
         ],
       },
+      {
+        id: 'step-2',
+        action: '切换阅读视图',
+        assertions: [
+          {
+            id: 'assert-2',
+            expect: '能够切换至幻灯片视图',
+            evidence: ['screenshot'],
+          },
+        ],
+      },
     ],
   });
   const run = await store.startRun({
     caseId: document.testCase.id,
     expectedRevision: document.revision,
     initialUrl: 'http://127.0.0.1',
-    credentials: { account: 'qa@example.test', password: 'plain-password' },
+    credentials: [
+      { account: 'qa@example.test', password: 'plain-password', role: '测试管理员' },
+      { account: 'guest@example.test', password: 'guest-password', role: '访客' },
+    ],
     executor: {
       agent: 'Playwright verification',
       model: null,
@@ -52,16 +66,23 @@ test('只读页面从用例列表进入详情并展示执行证据', async (t) =
   });
   const inbox = '.casedock/inbox/workbench.png';
   await writeFile(join(root, inbox), png);
-  const artifact = await store.addArtifact({
+  const artifact1 = await store.addArtifact({
     runId: run.id,
     stepId: 'step-1',
     assertionId: 'assert-1',
     kind: 'screenshot',
     source: inbox,
   });
+  const artifact2 = await store.addArtifact({
+    runId: run.id,
+    stepId: 'step-2',
+    assertionId: 'assert-2',
+    kind: 'screenshot',
+    source: inbox,
+  });
   await store.recordStep({
     runId: run.id,
-    requestId: 'browser-check',
+    requestId: 'browser-check-1',
     stepId: 'step-1',
     status: 'passed',
     observation: '用例列表已显示',
@@ -70,7 +91,22 @@ test('只读页面从用例列表进入详情并展示执行证据', async (t) =
         assertionId: 'assert-1',
         verdict: 'passed',
         observation: '页面显示一条测试用例',
-        artifactIds: [artifact.id],
+        artifactIds: [artifact1.id],
+      },
+    ],
+  });
+  await store.recordStep({
+    runId: run.id,
+    requestId: 'browser-check-2',
+    stepId: 'step-2',
+    status: 'passed',
+    observation: '视图可以平滑切换',
+    assertions: [
+      {
+        assertionId: 'assert-2',
+        verdict: 'passed',
+        observation: '幻灯片模式正常工作',
+        artifactIds: [artifact2.id],
       },
     ],
   });
@@ -102,7 +138,7 @@ test('只读页面从用例列表进入详情并展示执行证据', async (t) =
   await expect(page.getByRole('heading', { name: '测试用例' })).toBeVisible();
   await expect(page.getByRole('button', { name: /工作台基本流程/ })).toBeVisible();
   await expect(page.getByText(document.testCase.id, { exact: true })).toBeVisible();
-  await expect(page.getByText('1 个步骤 · 1 个检查点 · 1 次执行')).toBeVisible();
+  await expect(page.getByText('2 个步骤 · 2 个检查点 · 1 次执行')).toBeVisible();
   await expect(page.getByText('YOUR TESTS. YOUR AGENT.')).toHaveCount(0);
   await expect(page.getByText('新建用例')).toHaveCount(0);
   await expect(page.getByText('编辑')).toHaveCount(0);
@@ -125,13 +161,35 @@ test('只读页面从用例列表进入详情并展示执行证据', async (t) =
   await expect(page.getByRole('heading', { name: '执行详情' })).toBeVisible();
   await expect(page.getByText('Token 消耗', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('2,048', { exact: true }).first()).toBeVisible();
+
+  // 初始地址位于概览区并提供快捷操作
   await expect(page.getByText('初始地址', { exact: true })).toBeVisible();
-  await expect(page.getByText('qa@example.test', { exact: true })).toBeVisible();
-  await expect(page.getByText('plain-password', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '复制' }).first()).toBeVisible();
+
+  // 测试账密项整合并支持点击弹窗
+  await expect(page.getByText('测试账密', { exact: true })).toBeVisible();
+  await expect(page.getByText('共 2 套账密')).toBeVisible();
+  await page.getByRole('button', { name: '查看账密与复制' }).click();
+  await expect(page.getByRole('heading', { name: '测试账密（共 2 套）' })).toBeVisible();
+  await expect(page.getByText('测试管理员')).toBeVisible();
+  await expect(page.getByText('qa@example.test')).toBeVisible();
+  await expect(page.getByText('访客')).toBeVisible();
+  await expect(page.getByText('guest@example.test')).toBeVisible();
+  await page.getByRole('button', { name: '完成' }).click();
+  await expect(page.getByRole('heading', { name: '测试账密（共 2 套）' })).toHaveCount(0);
+
+  // 验证模式切换与幻灯片翻页
+  await expect(page.getByRole('button', { name: '◫ 幻灯片视图' })).toBeVisible();
+  await page.getByRole('button', { name: '◫ 幻灯片视图' }).click();
+  await expect(page.getByRole('tablist', { name: '步骤导航' })).toBeVisible();
+  await expect(page.getByText('第 1 / 2 步')).toBeVisible();
+  await page.getByRole('button', { name: '下一步 ›' }).click();
+  await expect(page.getByText('第 2 / 2 步')).toBeVisible();
+  await expect(page.getByText('视图可以平滑切换')).toBeVisible();
+
   await expect(page.getByText('目标地址', { exact: true })).toHaveCount(0);
   await expect(page.getByText('环境', { exact: true })).toHaveCount(0);
-  await expect(page.getByText('页面显示一条测试用例')).toBeVisible();
-  const image = page.locator('.evidence-grid img');
+  const image = page.locator('.evidence-grid img').first();
   await expect(image).toBeVisible();
   await expect
     .poll(() => image.evaluate((node: HTMLImageElement) => node.naturalWidth))

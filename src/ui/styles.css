@@ -538,6 +538,453 @@ small {
   margin: 0;
 }
 
+/* 概览区：初始地址与操作按钮 */
+.summary-url .url-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.summary-url .url-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+}
+
+.url-actions {
+  display: inline-flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.copy-chip,
+.link-chip {
+  padding: 2px 7px;
+  border: 1px solid #d5dbd7;
+  border-radius: 4px;
+  background: #fff;
+  color: #3b4740;
+  font-size: 11px;
+  text-decoration: none;
+  cursor: pointer;
+  line-height: 1.4;
+  transition: all 120ms ease;
+}
+
+.copy-chip:hover,
+.link-chip:hover {
+  background: #edf3ef;
+  border-color: #2b7357;
+  color: #207047;
+}
+
+/* 概览区：测试账密卡片 */
+.summary-credentials {
+  grid-column: 1 / -1;
+  padding-top: 10px;
+  border-top: 1px dashed #e3e7e4;
+}
+
+.credentials-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.credentials-info {
+  color: #3f4d45;
+  font-size: 13px;
+}
+
+.credentials-info strong {
+  color: #207047;
+}
+
+.account-preview {
+  color: #717d75;
+  margin-left: 4px;
+}
+
+.view-creds-btn {
+  padding: 5px 12px;
+  border: 1px solid #2b7357;
+  border-radius: 6px;
+  background: #f0f7f3;
+  color: #207047;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.view-creds-btn:hover {
+  background: #2b7357;
+  color: #fff;
+}
+
+/* 模态弹窗：测试账密 */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(18, 25, 22, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.modal-dialog {
+  width: 100%;
+  max-width: 540px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.16);
+  overflow: hidden;
+  animation: modalPop 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes modalPop {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 24px;
+  border-bottom: 1px solid #edf0ee;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 17px;
+  color: #17211c;
+}
+
+.close-btn {
+  border: 0;
+  background: transparent;
+  color: #78857d;
+  font-size: 22px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.close-btn:hover {
+  color: #17211c;
+  background: #f0f2f1;
+}
+
+.modal-body {
+  padding: 20px 24px;
+  overflow-y: auto;
+}
+
+.credentials-list {
+  display: grid;
+  gap: 16px;
+}
+
+.credential-card {
+  padding: 16px;
+  border: 1px solid #e1e6e2;
+  border-radius: 8px;
+  background: #fafbfb;
+}
+
+.credential-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.credential-card-title .badge {
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: #e5ece7;
+  color: #2c5942;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.credential-role {
+  font-size: 13px;
+  color: #3b4a40;
+}
+
+.credential-field {
+  display: grid;
+  grid-template-columns: 46px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.field-label {
+  color: #758279;
+  font-size: 12px;
+}
+
+.field-value {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 13px;
+  color: #1a241f;
+  word-break: break-all;
+}
+
+.selectable {
+  user-select: all;
+}
+
+.field-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.toggle-pwd-btn,
+.action-btn {
+  padding: 3px 8px;
+  border: 1px solid #d2d8d4;
+  border-radius: 4px;
+  background: #fff;
+  color: #45524a;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 100ms ease;
+  white-space: nowrap;
+}
+
+.toggle-pwd-btn:hover,
+.action-btn:hover {
+  border-color: #2b7357;
+  color: #207047;
+  background: #f3f8f5;
+}
+
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 14px 24px;
+  border-top: 1px solid #edf0ee;
+  background: #fbfcfb;
+}
+
+.primary-btn {
+  padding: 6px 18px;
+  border: 0;
+  border-radius: 6px;
+  background: #2b7357;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.primary-btn:hover {
+  background: #235c46;
+}
+
+/* 步骤与证据：标题栏与视图切换器 */
+.result-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.result-group-header h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.view-mode-toggle {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 7px;
+  background: #edf0ee;
+}
+
+.toggle-btn {
+  padding: 4px 11px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #637068;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.toggle-btn.active {
+  background: #fff;
+  color: #17211c;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+/* 幻灯片横向阅读模式 */
+.step-slide-view {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.step-nav-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 2px 10px;
+  scrollbar-width: thin;
+}
+
+.step-nav-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid #e1e6e3;
+  border-radius: 20px;
+  background: #fff;
+  color: #55625a;
+  font-size: 13px;
+  cursor: pointer;
+  flex-shrink: 0;
+  max-width: 240px;
+  transition: all 120ms ease;
+}
+
+.step-nav-pill:hover {
+  background: #f7faf8;
+  border-color: #cfd8d2;
+}
+
+.step-nav-pill.active {
+  background: #eef6f2;
+  border-color: #2b7357;
+  color: #1d593f;
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(43, 115, 87, 0.12);
+}
+
+.pill-index {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #e2e8e4;
+  color: #3a4740;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.step-nav-pill.active .pill-index {
+  background: #2b7357;
+  color: #fff;
+}
+
+.pill-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pill-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.slide-content-card {
+  border: 1px solid #e2e7e4;
+  border-radius: 10px;
+  padding: 20px;
+  background: #fff;
+}
+
+.slide-content-card .result-step {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.slide-footer-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  background: #f7faf8;
+  border: 1px solid #e6eae7;
+  border-radius: 8px;
+}
+
+.nav-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 16px;
+  border: 1px solid #cad4cd;
+  border-radius: 6px;
+  background: #fff;
+  color: #2b3831;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.nav-btn:hover:not(:disabled) {
+  border-color: #2b7357;
+  color: #207047;
+  background: #f2f7f4;
+}
+
+.nav-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  border-color: #e0e4e1;
+}
+
+.slide-progress {
+  color: #58655e;
+  font-size: 13px;
+}
+
+.slide-progress strong {
+  color: #17211c;
+}
+
+.slide-progress small {
+  color: #8c9690;
+  margin-left: 6px;
+}
+
 @media (max-width: 720px) {
   .content {
     width: min(100% - 32px, 1120px);
@@ -598,5 +1045,16 @@ small {
   .result-step-heading {
     flex-direction: column;
     gap: 8px;
+  }
+
+  .result-group-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .slide-footer-nav {
+    flex-direction: column;
+    gap: 12px;
   }
 }

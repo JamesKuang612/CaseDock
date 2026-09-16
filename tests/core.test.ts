@@ -364,6 +364,18 @@ test('初始地址与共用测试账密按原值记录，并拒绝废弃的环�
   await assert.rejects(store.startRun({ ...start, environment: 'production' }), code('VALIDATION'));
 });
 
+test('测试账密支持多套凭据数组记录并支持指定角色', async (t) => {
+  const { store, start } = await fixture(t);
+  const multiCredentials = [
+    { account: 'admin', password: 'admin-password', role: '管理员' },
+    { account: 'user01', password: 'user-password' },
+  ];
+  const run = await store.startRun({ ...start, credentials: multiCredentials });
+  assert.deepEqual(run.credentials, multiCredentials);
+  const loaded = await store.getRun(run.id);
+  assert.deepEqual(loaded.credentials, multiCredentials);
+});
+
 test('历史运行只有 targetUrl 且没有账密时仍可读取', async (t) => {
   const { root, store, start } = await fixture(t);
   const run = await store.startRun(start);

@@ -68,8 +68,9 @@ function executorSchema(evidence: unknown) {
 }
 const executor = executorSchema(screenshotEvidence);
 const legacyExecutor = executorSchema(legacyEvidence);
+const singleCredential = object({ account: text, password: text, role: text }, ['role']);
 const credentials = {
-  anyOf: [object({ account: text, password: text }), { type: 'null' }],
+  anyOf: [singleCredential, array(singleCredential, 1, 20), { type: 'null' }],
 };
 const preconditions = array(
   object({
