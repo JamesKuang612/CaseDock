@@ -9,6 +9,7 @@ import type {
   Run,
   RunSummary,
   SubmitTestResult,
+  TestCase,
   WorkspaceConfig,
 } from './models.js';
 import { CoreError, validate, validateCase, validateCaseIdentity } from './schema.js';
@@ -180,6 +181,31 @@ export class Store {
         throw new CoreError('FILE_SIZE', '用例超过 4 MiB，请拆分成更小的用例');
       await atomicWrite(path, content);
       return this.getCase(testCase.id);
+    });
+  }
+
+  /** 修改已有用例的标题，保持测试步骤与业务 ID 绝对不可更改。 */
+  async renameCase(id: string, title: string): Promise<CaseDocument> {
+    checkId(id);
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) throw new CoreError('VALIDATION', '用例名称不能为空');
+    if (trimmedTitle.length > 1000) throw new CoreError('VALIDATION', '用例名称过长');
+    const doc = await this.getCase(id);
+    const updated: TestCase = { ...doc.testCase, title: trimmedTitle };
+    return this.saveCase({ testCase: updated, expectedRevision: doc.revision });
+  }
+
+  /** 删除指定的测试用例文件，操作受写锁保护。 */
+  async deleteCase(id: string): Promise<void> {
+    checkId(id);
+    return withWriteLock(this.root, async () => {
+      const path = await safePath(this.root, `cases/${id}.test.yaml`);
+      try {
+        await rm(path);
+      } catch (error) {
+        if (isFsError(error, 'ENOENT')) throw new CoreError('NOT_FOUND', `找不到用例 ${id}`);
+        throw error;
+      }
     });
   }
 

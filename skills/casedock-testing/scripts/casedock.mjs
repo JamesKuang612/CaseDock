@@ -56080,6 +56080,29 @@ var Store = class {
       return this.getCase(testCase.id);
     });
   }
+  /** 修改已有用例的标题，保持测试步骤与业务 ID 绝对不可更改。 */
+  async renameCase(id2, title) {
+    checkId(id2);
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) throw new CoreError("VALIDATION", "\u7528\u4F8B\u540D\u79F0\u4E0D\u80FD\u4E3A\u7A7A");
+    if (trimmedTitle.length > 1e3) throw new CoreError("VALIDATION", "\u7528\u4F8B\u540D\u79F0\u8FC7\u957F");
+    const doc = await this.getCase(id2);
+    const updated = { ...doc.testCase, title: trimmedTitle };
+    return this.saveCase({ testCase: updated, expectedRevision: doc.revision });
+  }
+  /** 删除指定的测试用例文件，操作受写锁保护。 */
+  async deleteCase(id2) {
+    checkId(id2);
+    return withWriteLock(this.root, async () => {
+      const path4 = await safePath(this.root, `cases/${id2}.test.yaml`);
+      try {
+        await rm2(path4);
+      } catch (error) {
+        if (isFsError(error, "ENOENT")) throw new CoreError("NOT_FOUND", `\u627E\u4E0D\u5230\u7528\u4F8B ${id2}`);
+        throw error;
+      }
+    });
+  }
   /** 开始一次记录并冻结用例内容；此方法不会启动浏览器或 Agent。 */
   async startRun(input) {
     const value = validate("startRun", input);
@@ -56544,8 +56567,12 @@ async function createServer(root = process.cwd(), development = false, staticRoo
     const allowed = [`http://${host}`, ...development ? ["http://127.0.0.1:5173"] : []];
     if (origin && !allowed.includes(origin))
       return reply.code(403).send({ ok: false, error: { code: "ORIGIN", message: "\u8BF7\u6C42\u6765\u6E90\u4E0D\u88AB\u5141\u8BB8" } });
-    if (request.method !== "GET" && request.method !== "HEAD") {
-      return reply.code(405).send({ ok: false, error: { code: "READ_ONLY", message: "\u672C\u5730\u9875\u9762\u4EC5\u7528\u4E8E\u67E5\u770B\u6D4B\u8BD5\u8D44\u4EA7" } });
+    const isCaseMutation = ["PATCH", "DELETE"].includes(request.method) && /^\/api\/cases\/[a-z0-9][a-z0-9-]{0,79}$/.test(request.url.split("?")[0]);
+    if (!["GET", "HEAD"].includes(request.method) && !isCaseMutation) {
+      return reply.code(405).send({
+        ok: false,
+        error: { code: "READ_ONLY", message: "\u672C\u5730\u9875\u9762\u4EC5\u7528\u4E8E\u67E5\u770B\u6D4B\u8BD5\u8D44\u4EA7\u4E0E\u7BA1\u7406\u7528\u4F8B\u540D\u79F0" }
+      });
     }
     reply.header("Cache-Control", "no-store").header("X-Content-Type-Options", "nosniff");
   });
@@ -56570,6 +56597,20 @@ async function createServer(root = process.cwd(), development = false, staticRoo
     "/api/cases/:id",
     async (request) => store2.getCase(request.params.id)
   );
+  server.patch(
+    "/api/cases/:id",
+    async (request) => {
+      const title = request.body?.title;
+      if (typeof title !== "string") {
+        throw new CoreError("VALIDATION", "\u8BF7\u6C42\u4F53\u5FC5\u987B\u5305\u542B title \u5B57\u7B26\u4E32");
+      }
+      return store2.renameCase(request.params.id, title);
+    }
+  );
+  server.delete("/api/cases/:id", async (request) => {
+    await store2.deleteCase(request.params.id);
+    return { ok: true, deleted: request.params.id };
+  });
   server.get("/api/runs", async () => store2.listRuns());
   server.get(
     "/api/runs/:id",

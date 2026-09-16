@@ -23,10 +23,14 @@ export async function createServer(root = process.cwd(), development = false, st
       return reply
         .code(403)
         .send({ ok: false, error: { code: 'ORIGIN', message: '请求来源不被允许' } });
-    if (request.method !== 'GET' && request.method !== 'HEAD') {
-      return reply
-        .code(405)
-        .send({ ok: false, error: { code: 'READ_ONLY', message: '本地页面仅用于查看测试资产' } });
+    const isCaseMutation =
+      ['PATCH', 'DELETE'].includes(request.method) &&
+      /^\/api\/cases\/[a-z0-9][a-z0-9-]{0,79}$/.test(request.url.split('?')[0]);
+    if (!['GET', 'HEAD'].includes(request.method) && !isCaseMutation) {
+      return reply.code(405).send({
+        ok: false,
+        error: { code: 'READ_ONLY', message: '本地页面仅用于查看测试资产与管理用例名称' },
+      });
     }
     reply.header('Cache-Control', 'no-store').header('X-Content-Type-Options', 'nosniff');
   });
@@ -56,6 +60,20 @@ export async function createServer(root = process.cwd(), development = false, st
   server.get<{ Params: { id: string } }>('/api/cases/:id', async (request) =>
     store.getCase(request.params.id),
   );
+  server.patch<{ Params: { id: string }; Body: { title?: string } }>(
+    '/api/cases/:id',
+    async (request) => {
+      const title = request.body?.title;
+      if (typeof title !== 'string') {
+        throw new CoreError('VALIDATION', '请求体必须包含 title 字符串');
+      }
+      return store.renameCase(request.params.id, title);
+    },
+  );
+  server.delete<{ Params: { id: string } }>('/api/cases/:id', async (request) => {
+    await store.deleteCase(request.params.id);
+    return { ok: true, deleted: request.params.id };
+  });
   server.get('/api/runs', async () => store.listRuns());
   server.get<{ Params: { id: string } }>('/api/runs/:id', async (request) =>
     store.getRun(request.params.id),

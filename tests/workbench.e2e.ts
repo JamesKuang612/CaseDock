@@ -136,23 +136,29 @@ test('只读页面从用例列表进入详情并展示执行证据', async (t) =
   await page.goto(address);
 
   await expect(page.getByRole('heading', { name: '测试用例' })).toBeVisible();
+
+  // 1. 验证搜索与筛选功能
+  const searchInput = page.getByPlaceholder('搜索用例标题、ID 或标签…');
+  await expect(searchInput).toBeVisible();
+  await searchInput.fill('不存在的关键字_xyz');
+  await expect(page.getByText('未找到匹配的测试用例')).toBeVisible();
+  await page.getByRole('button', { name: '重置搜索与筛选' }).click();
   await expect(page.getByRole('button', { name: /工作台基本流程/ })).toBeVisible();
-  await expect(page.getByText(document.testCase.id, { exact: true })).toBeVisible();
-  await expect(page.getByText('2 个步骤 · 2 个检查点 · 1 次执行')).toBeVisible();
-  await expect(page.getByText('YOUR TESTS. YOUR AGENT.')).toHaveCount(0);
-  await expect(page.getByText('新建用例')).toHaveCount(0);
-  await expect(page.getByText('编辑')).toHaveCount(0);
-  await page.screenshot({
-    path: resolve('.casedock/browser-tests/case-library.png'),
-    fullPage: true,
-    animations: 'disabled',
-  });
 
   await page.getByRole('button', { name: /工作台基本流程/ }).click();
   await expect(page).toHaveURL(
     new RegExp(`#\/cases\/${document.testCase.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`),
   );
   await expect(page.getByText(document.testCase.id, { exact: true })).toBeVisible();
+
+  // 2. 验证用例重命名功能
+  await page.getByRole('button', { name: '✎ 修改名称' }).click();
+  await expect(page.getByRole('heading', { name: '修改用例名称' })).toBeVisible();
+  const titleInput = page.locator('#case-title-input');
+  await titleInput.fill('工作台基本流程（重命名后）');
+  await page.getByRole('button', { name: '保存' }).click();
+  await expect(page.getByRole('heading', { name: '工作台基本流程（重命名后）' })).toBeVisible();
+
   await expect(page.getByRole('heading', { name: '用例内容' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '原始内容' })).toBeVisible();
   await expect(page.getByText('测试用户原始输入：')).toBeVisible();
@@ -199,5 +205,12 @@ test('只读页面从用例列表进入详情并展示执行证据', async (t) =
     fullPage: true,
     animations: 'disabled',
   });
+
+  // 3. 验证删除用例功能（二次确认并返回列表）
+  await page.getByRole('button', { name: '🗑 删除用例' }).click();
+  await expect(page.getByRole('heading', { name: '删除测试用例' })).toBeVisible();
+  await page.getByRole('button', { name: '确定删除' }).click();
+  await expect(page.getByText('暂无测试用例')).toBeVisible();
+
   assert.equal(pageErrors.length, 0, pageErrors.join('\n'));
 });

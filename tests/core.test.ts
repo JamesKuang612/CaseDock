@@ -616,7 +616,21 @@ test('修改标题保留未变步骤注释，初始化重复运行不破坏忽�
   assert.equal(await readFile(join(root, '.gitignore'), 'utf8'), ignore);
 });
 
-test('HTTP API 拒绝外站与修改请求，只提供资产读取', async (t) => {
+test('用例支持通过 renameCase 修改标题，通过 deleteCase 安全删除', async (t) => {
+  const { store } = await fixture(t);
+  // 重命名
+  const renamed = await store.renameCase('login', '新登录用例标题');
+  assert.equal(renamed.testCase.title, '新登录用例标题');
+  assert.equal((await store.getCase('login')).testCase.title, '新登录用例标题');
+  await assert.rejects(store.renameCase('login', '   '), code('VALIDATION'));
+
+  // 删除
+  await store.deleteCase('login');
+  await assert.rejects(store.getCase('login'), code('NOT_FOUND'));
+  await assert.rejects(store.deleteCase('login'), code('NOT_FOUND'));
+});
+
+test('HTTP API 允许修改用例名称与删除用例，拒绝未授权的外站及非法写入', async (t) => {
   const { root } = await fixture(t);
   const server = await createServer(root);
   t.after(() => server.close());
@@ -629,11 +643,34 @@ test('HTTP API 拒绝外站与修改请求，只提供资产读取', async (t) =
       .statusCode,
     403,
   );
+  // POST 依然拒绝
   assert.equal(
     (await server.inject({ method: 'POST', url: '/api/cases', payload: {} })).statusCode,
     405,
   );
-  const result = await server.inject('/api/cases');
-  assert.equal(result.statusCode, 200);
-  assert.equal(result.json().cases.length, 1);
+  // POST 到运行依然拒绝
+  assert.equal(
+    (await server.inject({ method: 'POST', url: '/api/runs', payload: {} })).statusCode,
+    405,
+  );
+
+  // PATCH 重命名用例允许
+  const patchRes = await server.inject({
+    method: 'PATCH',
+    url: '/api/cases/login',
+    payload: { title: '通过 API 修改标题' },
+  });
+  assert.equal(patchRes.statusCode, 200);
+  assert.equal(patchRes.json().testCase.title, '通过 API 修改标题');
+
+  // DELETE 删除用例允许
+  const delRes = await server.inject({
+    method: 'DELETE',
+    url: '/api/cases/login',
+  });
+  assert.equal(delRes.statusCode, 200);
+  assert.equal(delRes.json().ok, true);
+
+  const listRes = await server.inject('/api/cases');
+  assert.equal(listRes.json().cases.length, 0);
 });

@@ -89,8 +89,26 @@ small {
   border-radius: 12px;
 }
 
+.case-row-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #edf0ee;
+  background: #fff;
+  transition: background 120ms ease;
+}
+
+.case-row-wrapper:last-child {
+  border-bottom: 0;
+}
+
+.case-row-wrapper:hover {
+  background: #fafcfb;
+}
+
 .case-row {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   min-height: 94px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto 18px;
@@ -98,22 +116,50 @@ small {
   gap: 28px;
   padding: 20px 24px;
   border: 0;
-  border-bottom: 1px solid #edf0ee;
-  background: #fff;
+  background: transparent;
   color: inherit;
   text-align: left;
   cursor: pointer;
-  transition:
-    background 120ms ease,
-    border-color 120ms ease;
 }
 
-.case-row:last-child {
-  border-bottom: 0;
+.case-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 18px;
+  opacity: 0.25;
+  transition: opacity 120ms ease;
 }
 
-.case-row:hover {
-  background: #fafcfb;
+.case-row-wrapper:hover .case-item-actions {
+  opacity: 1;
+}
+
+.item-action-btn {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid #d9e0db;
+  border-radius: 6px;
+  background: #fff;
+  color: #55665d;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.item-action-btn:hover {
+  border-color: #2b7357;
+  color: #207047;
+  background: #f0f7f3;
+}
+
+.item-action-btn.delete-action-btn:hover {
+  border-color: #d13b35;
+  color: #b52d28;
+  background: #fcebea;
 }
 
 .case-row:focus-visible,
@@ -536,6 +582,268 @@ small {
 .empty-inline {
   min-height: 80px;
   margin: 0;
+}
+
+/* 列表页：搜索工具栏与状态筛选 */
+.search-filter-bar {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-icon {
+  position: absolute;
+  left: 14px;
+  color: #8c9991;
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.search-input {
+  width: 100%;
+  height: 42px;
+  padding: 0 38px 0 40px;
+  border: 1px solid #dbe1dc;
+  border-radius: 9px;
+  background: #fff;
+  color: #17211c;
+  font-size: 14px;
+  font-family: inherit;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: #2b7357;
+  box-shadow: 0 0 0 3px rgba(43, 115, 87, 0.12);
+}
+
+.clear-search-btn {
+  position: absolute;
+  right: 12px;
+  border: 0;
+  background: transparent;
+  color: #8c9991;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.clear-search-btn:hover {
+  color: #17211c;
+}
+
+.status-filter-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.filter-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 1px solid #dce2de;
+  border-radius: 20px;
+  background: #fff;
+  color: #55635b;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 120ms ease;
+}
+
+.filter-tab:hover {
+  border-color: #b5c2b9;
+  background: #f6faf7;
+}
+
+.filter-tab.active {
+  background: #2b7357;
+  border-color: #2b7357;
+  color: #fff;
+  font-weight: 600;
+}
+
+.filter-tab span {
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: #edf1ee;
+  color: #4b5750;
+  font-size: 11px;
+}
+
+.filter-tab.active span {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+
+.clear-filters-btn {
+  margin-top: 10px;
+  padding: 6px 14px;
+  border: 1px solid #cad4cd;
+  border-radius: 6px;
+  background: #fff;
+  color: #207047;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.clear-filters-btn:hover {
+  background: #f0f7f3;
+}
+
+/* 详情页头部：修改名称与删除用例操作按钮 */
+.detail-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 14px;
+}
+
+.detail-action-btn {
+  padding: 4px 10px;
+  border: 1px solid #d5ded8;
+  border-radius: 6px;
+  background: #fff;
+  color: #43544b;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.detail-action-btn:hover {
+  border-color: #2b7357;
+  color: #207047;
+  background: #f2f7f4;
+}
+
+.detail-action-btn.delete-btn {
+  color: #9c2824;
+  border-color: #f0d5d3;
+}
+
+.detail-action-btn.delete-btn:hover {
+  border-color: #d13b35;
+  color: #b52d28;
+  background: #fcebea;
+}
+
+/* 模态弹窗特定样式扩展 */
+.modal-small {
+  max-width: 440px;
+}
+
+.danger-header h3 {
+  color: #b52d28;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.form-group:last-child {
+  margin-bottom: 0;
+}
+
+.text-input {
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid #cfd7d1;
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: inherit;
+  color: #17211c;
+  box-sizing: border-box;
+}
+
+.text-input:focus {
+  outline: none;
+  border-color: #2b7357;
+  box-shadow: 0 0 0 3px rgba(43, 115, 87, 0.15);
+}
+
+.locked-id-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border: 1px solid #e2e8e4;
+  border-radius: 6px;
+  background: #f4f6f5;
+}
+
+.locked-id-box code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  color: #55635b;
+}
+
+.lock-badge {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #e2e8e4;
+  color: #69786f;
+  font-size: 11px;
+}
+
+.danger-text {
+  margin: 0 0 12px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #1a241f;
+}
+
+.warning-hint {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: #8c9790;
+}
+
+.danger-btn {
+  padding: 6px 18px;
+  border: 0;
+  border-radius: 6px;
+  background: #b52d28;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.danger-btn:hover:not(:disabled) {
+  background: #96221e;
+}
+
+.danger-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.inline-error {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  font-size: 12px;
 }
 
 /* 概览区：初始地址与操作按钮 */
