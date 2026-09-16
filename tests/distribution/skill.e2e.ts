@@ -66,7 +66,18 @@ test('完整 Skill 离开源码与 node_modules 后仍能初始化、提交、�
   const runner = join(skillRoot, 'scripts/casedock.mjs');
 
   assert.ok((await stat(runner)).size > 1_000_000);
-  assert.match(await readFile(join(skillRoot, 'SKILL.md'), 'utf8'), /不约束测试怎么做/);
+  const skillInstructions = await readFile(join(skillRoot, 'SKILL.md'), 'utf8');
+  assert.match(skillInstructions, /不约束测试怎么做/);
+  assert.match(skillInstructions, /references\/jiandaoyun\/INDEX\.md/);
+  const jiandaoyunIndex = await readFile(join(skillRoot, 'references/jiandaoyun/INDEX.md'), 'utf8');
+  assert.match(jiandaoyunIndex, /navigation\/open-platform\.md/);
+  assert.match(jiandaoyunIndex, /只读取下表命中的参考文件/);
+  for (const link of jiandaoyunIndex.matchAll(/\]\((?!https?:\/\/)([^)#]+\.md)\)/g)) {
+    assert.ok(
+      (await stat(join(skillRoot, 'references/jiandaoyun', link[1]))).isFile(),
+      `简道云索引引用不存在：${link[1]}`,
+    );
+  }
   assert.ok((await stat(join(skillRoot, 'assets/ui/index.html'))).isFile());
 
   await mkdir(assetRoot);
