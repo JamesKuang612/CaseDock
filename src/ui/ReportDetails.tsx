@@ -2,11 +2,17 @@ import { useState, useEffect, useMemo } from 'react';
 import type { Report, ReportCase, ReportStep } from '../core/models';
 import { api } from './api';
 
-/** 格式化持续时间为易读秒数或毫秒。 */
+/** 格式化持续时间为易读分秒或毫秒。 */
 export function formatDurationMs(milliseconds?: number) {
   if (milliseconds === undefined || milliseconds === null) return '—';
-  const sec = Math.max(0, Math.round(Number(milliseconds) / 1000));
-  return `${sec} 秒`;
+  const totalSec = Math.max(0, Math.round(Number(milliseconds) / 1000));
+  if (totalSec === 0 && Number(milliseconds) > 0) return '< 1 秒';
+  if (totalSec < 60) return `${totalSec} 秒`;
+  const minutes = Math.floor(totalSec / 60);
+  const remainder = totalSec % 60;
+  if (minutes < 60) return remainder ? `${minutes} 分 ${remainder} 秒` : `${minutes} 分钟`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours} 小时 ${minutes % 60} 分`;
 }
 
 /** 将 ISO 时间转换为本地日期时间文本。 */
@@ -37,7 +43,7 @@ export function reportStatusLabel(status: string) {
 }
 
 /** 复制文本到剪贴板，兼容旧环境。 */
-async function copyToClipboard(text: string): Promise<boolean> {
+export async function copyToClipboard(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
     return true;
@@ -52,83 +58,6 @@ async function copyToClipboard(text: string): Promise<boolean> {
     textarea.remove();
     return ok;
   }
-}
-
-/** 重跑用例模态弹窗，提供 Agent 专用重跑提示词与一键复制。 */
-function RerunModal({
-  testCase,
-  report,
-  onClose,
-}: {
-  testCase: ReportCase;
-  report: Report;
-  onClose: () => void;
-}) {
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
-
-  const promptText = useMemo(() => {
-    const originalCase = {
-      id: testCase.id,
-      title: testCase.title,
-      category: testCase.category,
-      testData: testCase.testData,
-      definition: testCase.definition,
-    };
-    return [
-      `请使用 CaseDock 重测以下用例。`,
-      '',
-      `测试报告：${report.title} (ID: ${report.runId})`,
-      `用例名称：${testCase.title}`,
-      '',
-      `原始用例信息：`,
-      JSON.stringify(originalCase, null, 2),
-    ].join('\n');
-  }, [testCase, report]);
-
-  async function handleCopy() {
-    const success = await copyToClipboard(promptText);
-    if (success) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  }
-
-  return (
-    <div className="modal-backdrop" onClick={onClose} role="dialog" aria-modal="true">
-      <div className="modal-dialog modal-medium" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h3>重跑用例提示词</h3>
-          <button type="button" className="close-btn" onClick={onClose} aria-label="关闭">
-            ×
-          </button>
-        </div>
-        <div className="modal-body">
-          <p className="modal-description">
-            将以下内容复制并直接发送给 Agent，即可精准重测当前用例并保留原始参数：
-          </p>
-          <div className="form-group">
-            <textarea className="rerun-textarea" readOnly rows={10} value={promptText} />
-          </div>
-        </div>
-        <div className="modal-footer">
-          <button type="button" className="btn btn-secondary" onClick={onClose}>
-            关闭
-          </button>
-          <button type="button" className="btn btn-primary" onClick={handleCopy}>
-            {copied ? '已复制到剪贴板！' : '一键复制'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 /** 修改用例名称弹窗。 */
@@ -208,8 +137,8 @@ function RenameCaseModal({
   );
 }
 
-/** 修改报告名称弹窗。 */
-function RenameReportModal({
+/** 修改用例集名称弹窗。 */
+function RenameSuiteModal({
   report,
   onClose,
   onSuccess,
@@ -226,7 +155,7 @@ function RenameReportModal({
     e.preventDefault();
     const trimmed = title.trim();
     if (!trimmed) {
-      setError('报告名称不能为空');
+      setError('用例集名称不能为空');
       return;
     }
     setSaving(true);
@@ -247,7 +176,7 @@ function RenameReportModal({
     <div className="modal-backdrop" onClick={onClose} role="dialog" aria-modal="true">
       <div className="modal-dialog modal-small" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3>修改报告名称</h3>
+          <h3>修改用例集名称</h3>
           <button type="button" className="close-btn" onClick={onClose} aria-label="关闭">
             ×
           </button>
@@ -257,7 +186,7 @@ function RenameReportModal({
             {error && <div className="error-panel inline-error">{error}</div>}
             <div className="form-group">
               <label className="field-label" htmlFor="report-rename-input">
-                报告名称
+                用例集名称
               </label>
               <input
                 id="report-rename-input"
@@ -305,33 +234,46 @@ function Lightbox({ src, alt, onClose }: { src: string; alt: string; onClose: ()
   );
 }
 
-/** 完整测试报告双栏详情大盘。 */
+/** 完整测试报告/用例集双栏详情大盘。 */
 export function ReportDetails({
   report: initialReport,
+  initialCaseId,
   onBack,
   onReportDeleted,
 }: {
   report: Report;
+  initialCaseId?: string;
   onBack: () => void;
   onReportDeleted: (deletedRunId: string) => void;
 }) {
   const [report, setReport] = useState<Report>(initialReport);
-  const [selectedCaseId, setSelectedCaseId] = useState<string>(initialReport.cases[0]?.id || '');
+  const [selectedCaseId, setSelectedCaseId] = useState<string>(
+    initialCaseId || initialReport.cases[0]?.id || '',
+  );
   const [caseFilter, setCaseFilter] = useState<'all' | 'failed' | 'passed'>('all');
   const [viewMode, setViewMode] = useState<'final' | 'slides'>('final');
   const [slideIndex, setSlideIndex] = useState(0);
   const [lightboxSrc, setLightboxSrc] = useState<{ src: string; alt: string } | null>(null);
 
-  // 弹窗状态
-  const [showRerunModal, setShowRerunModal] = useState(false);
+  // 弹窗与提示状态
   const [showRenameCaseModal, setShowRenameCaseModal] = useState(false);
-  const [showRenameReportModal, setShowRenameReportModal] = useState(false);
+  const [showRenameSuiteModal, setShowRenameSuiteModal] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  /** 复制指定文本并弹出短暂 Toast 提示。 */
+  async function copyTextWithToast(text: string, toast: string) {
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      setToastMessage(toast);
+      setTimeout(() => setToastMessage(null), 2500);
+    }
+  }
 
   useEffect(() => {
     setReport(initialReport);
-    setSelectedCaseId(initialReport.cases[0]?.id || '');
+    setSelectedCaseId(initialCaseId || initialReport.cases[0]?.id || '');
     setSlideIndex(0);
-  }, [initialReport]);
+  }, [initialReport, initialCaseId]);
 
   const currentCase: ReportCase | undefined =
     report.cases.find((c) => c.id === selectedCaseId) || report.cases[0];
@@ -365,9 +307,9 @@ export function ReportDetails({
     return `/api/reports/${encodeURIComponent(report.runId)}/evidence/${encodeURIComponent(filename)}`;
   }
 
-  // 删除报告确认
+  // 删除用例集确认
   async function handleDeleteReport() {
-    if (!confirm(`确定删除报告“${report.title}”及其全部运行数据吗？此操作不可撤销。`)) return;
+    if (!confirm(`确定删除用例集“${report.title}”及其全部运行数据吗？此操作不可撤销。`)) return;
     try {
       await api(`/reports/${report.runId}`, { method: 'DELETE' });
       onReportDeleted(report.runId);
@@ -395,9 +337,9 @@ export function ReportDetails({
     return (
       <div className="detail-page empty">
         <button type="button" className="back-link" onClick={onBack}>
-          ← 返回报告列表
+          ← 返回用例集列表
         </button>
-        <p>该报告中暂无用例</p>
+        <p>该用例集中暂无用例</p>
       </div>
     );
   }
@@ -410,7 +352,7 @@ export function ReportDetails({
     <section className="detail-page report-dashboard">
       {/* 顶部返回导航 */}
       <button type="button" className="back-link" onClick={onBack}>
-        ← 返回报告列表
+        ← 返回用例集列表
       </button>
 
       {/* 顶部测试指挥舱看板 (Cockpit Hero) */}
@@ -418,7 +360,8 @@ export function ReportDetails({
         <div className="cockpit-hero-header">
           <div className="cockpit-hero-title-group">
             <div className="cockpit-hero-meta-badge">
-              <span className="hero-cockpit-tag">TEST COCKPIT</span>
+              <span className="hero-cockpit-tag">TEST SUITE 用例集指挥舱</span>
+              <span className="hero-id-badge">ID: {report.runId}</span>
               <span className="hero-timestamp">开始 {formatReportTime(report.startedAt)}</span>
               <span className={`badge ${report.status}`}>{reportStatusLabel(report.status)}</span>
             </div>
@@ -428,12 +371,39 @@ export function ReportDetails({
             <button
               type="button"
               className="btn btn-secondary"
-              onClick={() => setShowRenameReportModal(true)}
+              onClick={() => copyTextWithToast(report.runId, `已复制用例集 ID: ${report.runId}`)}
+              title="复制当前用例集 ID"
             >
-              修改报告名称
+              复制用例集 ID
+            </button>
+            {failCount > 0 && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-failed-copy"
+                onClick={() => {
+                  const failedIds = report.cases
+                    .filter((c) => c.status === 'failed')
+                    .map((c) => c.id)
+                    .join(', ');
+                  copyTextWithToast(
+                    `请使用 CaseDock 重测用例集 ${report.runId} 中的失败用例：${failedIds}`,
+                    '已复制失败用例重测指令！直接发送给 Agent 即可执行。',
+                  );
+                }}
+                title="复制所有失败小用例重测指令"
+              >
+                复制失败重测指令 ({failCount})
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setShowRenameSuiteModal(true)}
+            >
+              修改用例集名称
             </button>
             <button type="button" className="btn btn-danger" onClick={handleDeleteReport}>
-              删除报告
+              删除用例集
             </button>
           </div>
         </div>
@@ -475,7 +445,7 @@ export function ReportDetails({
 
           {/* 右侧执行摘要说明 */}
           <div className="hero-summary-block">
-            <div className="hero-summary-header">报告执行摘要</div>
+            <div className="hero-summary-header">用例集执行摘要</div>
             <p className="hero-summary-text">{report.summary || '无额外测试摘要'}</p>
           </div>
         </div>
@@ -580,9 +550,25 @@ export function ReportDetails({
             <button
               type="button"
               className="btn btn-secondary"
-              onClick={() => setShowRerunModal(true)}
+              onClick={() =>
+                copyTextWithToast(currentCase.id, `已复制小用例 ID: ${currentCase.id}`)
+              }
+              title="复制当前小用例 ID"
             >
-              重跑
+              复制用例 ID
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() =>
+                copyTextWithToast(
+                  `请使用 CaseDock 重跑用例集 ${report.runId} 中的用例 ${currentCase.id}`,
+                  '已复制重测指令！直接发送给 Agent 即可执行。',
+                )
+              }
+              title="复制发给 Agent 的轻量重测指令"
+            >
+              复制重测指令
             </button>
             <button
               type="button"
@@ -598,7 +584,10 @@ export function ReportDetails({
 
           {/* 分类与标题 */}
           <div className="case-title-block">
-            <p className="case-category">{currentCase.category || '未分类'}</p>
+            <div className="case-category-row">
+              <span className="case-category">{currentCase.category || '未分类'}</span>
+              <span className="case-id-badge">小用例 ID: {currentCase.id}</span>
+            </div>
             <div className="case-title-row">
               <h2>{currentCase.title}</h2>
               <span className={`badge ${currentCase.status}`}>
@@ -807,13 +796,6 @@ export function ReportDetails({
       </div>
 
       {/* 模态弹窗挂载 */}
-      {showRerunModal && (
-        <RerunModal
-          testCase={currentCase}
-          report={report}
-          onClose={() => setShowRerunModal(false)}
-        />
-      )}
       {showRenameCaseModal && (
         <RenameCaseModal
           reportId={report.runId}
@@ -825,13 +807,13 @@ export function ReportDetails({
           }}
         />
       )}
-      {showRenameReportModal && (
-        <RenameReportModal
+      {showRenameSuiteModal && (
+        <RenameSuiteModal
           report={report}
-          onClose={() => setShowRenameReportModal(false)}
+          onClose={() => setShowRenameSuiteModal(false)}
           onSuccess={(upd) => {
             setReport(upd);
-            setShowRenameReportModal(false);
+            setShowRenameSuiteModal(false);
           }}
         />
       )}
@@ -841,6 +823,14 @@ export function ReportDetails({
           alt={lightboxSrc.alt}
           onClose={() => setLightboxSrc(null)}
         />
+      )}
+
+      {/* 浮动 Toast 提示 */}
+      {toastMessage && (
+        <div className="casedock-toast" role="status">
+          <span className="toast-icon">✓</span>
+          <span>{toastMessage}</span>
+        </div>
       )}
     </section>
   );

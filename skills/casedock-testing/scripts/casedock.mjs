@@ -56941,6 +56941,81 @@ var Store = class {
     const { mime } = inspectScreenshot(bytes);
     return { mime, bytes };
   }
+  /** 列出全体用例库（聚合所有用例集内的全部小用例及根独立用例库）。 */
+  async listAllCases() {
+    const allCases = [];
+    const errors = [];
+    const reportNames = (await this.names("reports", "")).filter(isId);
+    for (const reportId of reportNames) {
+      try {
+        const report = await this.getReport(reportId);
+        for (const item of report.cases) {
+          const stepCount = item.steps?.length ?? item.definition?.steps?.length ?? 1;
+          const assertionCount = item.definition?.assertions?.length ?? 1;
+          allCases.push({
+            id: item.id,
+            title: item.title,
+            category: item.category,
+            suiteId: report.runId,
+            suiteTitle: report.title,
+            status: item.status,
+            stepCount,
+            assertionCount,
+            updatedAt: item.startedAt || report.startedAt,
+            sourceType: "suite"
+          });
+        }
+      } catch (error) {
+        errors.push({
+          path: `reports/${reportId}`,
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+    try {
+      const { cases: standaloneCases, errors: caseErrors } = await this.listCases();
+      errors.push(...caseErrors);
+      const { runs: runs2 } = await this.listRuns().catch(() => ({ runs: [] }));
+      for (const doc of standaloneCases) {
+        const relatedRuns = runs2.filter((r) => r.caseId === doc.testCase.id);
+        const latestRun = relatedRuns[0];
+        let status = "pending";
+        if (latestRun) {
+          const v = latestRun.verdict ?? latestRun.status;
+          if (v === "passed") status = "passed";
+          else if (v === "failed") status = "failed";
+          else if (v === "inconclusive") status = "inconclusive";
+          else if (v === "running") status = "pending";
+        }
+        const stepCount = doc.testCase.steps.length;
+        const assertionCount = doc.testCase.steps.reduce((acc, s) => acc + s.assertions.length, 0);
+        allCases.push({
+          id: doc.testCase.id,
+          title: doc.testCase.title,
+          category: doc.testCase.tags?.[0],
+          status,
+          stepCount,
+          assertionCount,
+          updatedAt: latestRun?.startedAt,
+          sourceType: "standalone"
+        });
+      }
+    } catch (error) {
+      errors.push({
+        path: "cases",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+    allCases.sort((a, b) => {
+      if (a.updatedAt && b.updatedAt) {
+        return b.updatedAt.localeCompare(a.updatedAt);
+      }
+      if (a.updatedAt) return -1;
+      if (b.updatedAt) return 1;
+      return a.id.localeCompare(b.id);
+    });
+    return { cases: allCases, errors };
+  }
 };
 
 // src/server/index.ts
@@ -56984,6 +57059,7 @@ async function createServer(root = process.cwd(), development = false, staticRoo
   server.get("/api/workspace", async () => store2.getWorkspace());
   server.get("/api/schemas", async () => schemas);
   server.get("/api/cases", async () => store2.listCases());
+  server.get("/api/all-cases", async () => store2.listAllCases());
   server.get(
     "/api/cases/:id",
     async (request) => store2.getCase(request.params.id)

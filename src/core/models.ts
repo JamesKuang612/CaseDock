@@ -300,3 +300,27 @@ export interface SubmitReportResult {
   evidenceDirectory: string;
   totals: ReportTotals;
 }
+
+/** 全体用例库聚合项：整合用例集内小用例与独立用例的全局实体。 */
+export interface UnifiedCaseItem {
+  /** 小用例唯一标识（如 tc-plugin-001 或 case-xxx） */
+  id: string;
+  /** 小用例标题 */
+  title: string;
+  /** 所属业务分类或模块 */
+  category?: string;
+  /** 所属用例集 ID（如果是用例集内小用例） */
+  suiteId?: string;
+  /** 所属用例集标题（如果是用例集内小用例） */
+  suiteTitle?: string;
+  /** 当前或最新执行结论 */
+  status: 'passed' | 'failed' | 'blocked' | 'skipped' | 'inconclusive' | 'pending';
+  /** 步骤总数 */
+  stepCount: number;
+  /** 检查点总数 */
+  assertionCount: number;
+  /** 最近更新或执行时间 */
+  updatedAt?: string;
+  /** 用例来源类型：suite（来自用例集）或 standalone（来自根独立用例库） */
+  sourceType: 'suite' | 'standalone';
+}

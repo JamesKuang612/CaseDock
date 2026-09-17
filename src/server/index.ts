@@ -62,6 +62,7 @@ export async function createServer(root = process.cwd(), development = false, st
   server.get('/api/workspace', async () => store.getWorkspace());
   server.get('/api/schemas', async () => schemas);
   server.get('/api/cases', async () => store.listCases());
+  server.get('/api/all-cases', async () => store.listAllCases());
   server.get<{ Params: { id: string } }>('/api/cases/:id', async (request) =>
     store.getCase(request.params.id),
   );

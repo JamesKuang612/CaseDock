@@ -18,6 +18,7 @@ import type {
   SubmitReportResult,
   SubmitTestResult,
   TestCase,
+  UnifiedCaseItem,
   WorkspaceConfig,
 } from './models.js';
 import { CoreError, validate, validateCase, validateCaseIdentity } from './schema.js';
@@ -1066,5 +1067,94 @@ export class Store {
     const bytes = await readBounded(filePath, 20 * 1024 * 1024);
     const { mime } = inspectScreenshot(bytes);
     return { mime, bytes };
+  }
+
+  /** 列出全体用例库（聚合所有用例集内的全部小用例及根独立用例库）。 */
+  async listAllCases(): Promise<{
+    cases: UnifiedCaseItem[];
+    errors: { path: string; message: string }[];
+  }> {
+    const allCases: UnifiedCaseItem[] = [];
+    const errors: { path: string; message: string }[] = [];
+
+    // 1. 遍历所有测试用例集（Reports/Suites），提取每个用例集内部的全部小用例
+    const reportNames = (await this.names('reports', '')).filter(isId);
+    for (const reportId of reportNames) {
+      try {
+        const report = await this.getReport(reportId);
+        for (const item of report.cases) {
+          const stepCount = item.steps?.length ?? item.definition?.steps?.length ?? 1;
+          const assertionCount = item.definition?.assertions?.length ?? 1;
+          allCases.push({
+            id: item.id,
+            title: item.title,
+            category: item.category,
+            suiteId: report.runId,
+            suiteTitle: report.title,
+            status: item.status,
+            stepCount,
+            assertionCount,
+            updatedAt: item.startedAt || report.startedAt,
+            sourceType: 'suite',
+          });
+        }
+      } catch (error) {
+        errors.push({
+          path: `reports/${reportId}`,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    // 2. 遍历传统根目录独立用例（cases/*.test.yaml）
+    try {
+      const { cases: standaloneCases, errors: caseErrors } = await this.listCases();
+      errors.push(...caseErrors);
+      const { runs } = await this.listRuns().catch(() => ({ runs: [] as RunSummary[] }));
+
+      for (const doc of standaloneCases) {
+        const relatedRuns = runs.filter((r) => r.caseId === doc.testCase.id);
+        const latestRun = relatedRuns[0];
+        let status: UnifiedCaseItem['status'] = 'pending';
+        if (latestRun) {
+          const v = latestRun.verdict ?? latestRun.status;
+          if (v === 'passed') status = 'passed';
+          else if (v === 'failed') status = 'failed';
+          else if (v === 'inconclusive') status = 'inconclusive';
+          else if (v === 'running') status = 'pending';
+        }
+
+        const stepCount = doc.testCase.steps.length;
+        const assertionCount = doc.testCase.steps.reduce((acc, s) => acc + s.assertions.length, 0);
+
+        allCases.push({
+          id: doc.testCase.id,
+          title: doc.testCase.title,
+          category: doc.testCase.tags?.[0],
+          status,
+          stepCount,
+          assertionCount,
+          updatedAt: latestRun?.startedAt,
+          sourceType: 'standalone',
+        });
+      }
+    } catch (error) {
+      errors.push({
+        path: 'cases',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    // 按更新时间倒序排序，保证最新执行或变动的小用例排在最前
+    allCases.sort((a, b) => {
+      if (a.updatedAt && b.updatedAt) {
+        return b.updatedAt.localeCompare(a.updatedAt);
+      }
+      if (a.updatedAt) return -1;
+      if (b.updatedAt) return 1;
+      return a.id.localeCompare(b.id);
+    });
+
+    return { cases: allCases, errors };
   }
 }

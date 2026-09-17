@@ -1,8 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { CaseDocument, Report, ReportSummary, Run, RunSummary } from '../core/models';
+import type {
+  CaseDocument,
+  Report,
+  ReportSummary,
+  Run,
+  RunSummary,
+  UnifiedCaseItem,
+} from '../core/models';
 import { api } from './api';
 import { RunDetails, formatDuration, formatTokenUsage, label, statusClass } from './RunDetails';
-import { ReportDetails, formatReportTime, reportStatusLabel } from './ReportDetails';
+import {
+  ReportDetails,
+  formatReportTime,
+  reportStatusLabel,
+  copyToClipboard,
+} from './ReportDetails';
 
 /** 将 ISO 时间显示为本地日期与分钟，避免列表信息过密。 */
 function formatTime(value: string) {
@@ -15,16 +27,24 @@ function formatTime(value: string) {
   });
 }
 
-/** 从当前 URL（参数或 hash）解析目标路由。 */
-function routeFromLocation(): { type: 'report'; id: string } | { type: 'case'; id: string } | null {
+/** 从当前 URL（参数或 hash）解析目标路由，支持解析指定的小用例定位参数。 */
+function routeFromLocation():
+  { type: 'report'; id: string; caseId?: string } | { type: 'case'; id: string } | null {
   const searchParams = new URLSearchParams(window.location.search);
   const runParam = searchParams.get('run');
   if (runParam) return { type: 'report', id: runParam };
 
-  const reportMatch = window.location.hash.match(/^#\/reports\/([^/]+)$/);
-  if (reportMatch) return { type: 'report', id: decodeURIComponent(reportMatch[1]) };
+  const hash = window.location.hash;
+  const reportMatch = hash.match(/^#\/reports\/([^/?]+)(?:\?case=([^&]+))?$/);
+  if (reportMatch) {
+    return {
+      type: 'report',
+      id: decodeURIComponent(reportMatch[1]),
+      caseId: reportMatch[2] ? decodeURIComponent(reportMatch[2]) : undefined,
+    };
+  }
 
-  const caseMatch = window.location.hash.match(/^#\/cases\/([^/]+)$/);
+  const caseMatch = hash.match(/^#\/cases\/([^/?]+)$/);
   if (caseMatch) return { type: 'case', id: decodeURIComponent(caseMatch[1]) };
 
   return null;
@@ -185,8 +205,8 @@ function DeleteModal({
   );
 }
 
-/** 报告重命名模态弹窗。 */
-function RenameReportModal({
+/** 用例集重命名模态弹窗。 */
+function RenameSuiteModal({
   reportSummary,
   onClose,
   onSuccess,
@@ -203,7 +223,7 @@ function RenameReportModal({
     e.preventDefault();
     const trimmed = title.trim();
     if (!trimmed) {
-      setError('报告名称不能为空');
+      setError('用例集名称不能为空');
       return;
     }
     setSaving(true);
@@ -224,7 +244,7 @@ function RenameReportModal({
     <div className="modal-backdrop" onClick={onClose} role="dialog" aria-modal="true">
       <div className="modal-dialog modal-small" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3>修改报告名称</h3>
+          <h3>修改用例集名称</h3>
           <button type="button" className="close-btn" onClick={onClose} aria-label="关闭">
             ×
           </button>
@@ -234,7 +254,7 @@ function RenameReportModal({
             {error && <div className="error-panel inline-error">{error}</div>}
             <div className="form-group">
               <label className="field-label" htmlFor="report-name-input">
-                报告名称
+                用例集名称
               </label>
               <input
                 id="report-name-input"
@@ -263,10 +283,18 @@ function RenameReportModal({
 /** 提供测试报告流与独立用例库视图的主入口组件。 */
 export function App() {
   const [reports, setReports] = useState<ReportSummary[]>([]);
+  const [allCases, setAllCases] = useState<UnifiedCaseItem[]>([]);
   const [cases, setCases] = useState<CaseDocument[]>([]);
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  /** 弹出全局 Toast 浮动提示。 */
+  function showToast(msg: string) {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 2500);
+  }
 
   // 路由状态
   const [currentRoute, setCurrentRoute] = useState(routeFromLocation);
@@ -274,7 +302,7 @@ export function App() {
   const [selectedRun, setSelectedRun] = useState<Run | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
 
-  // 视图切换（默认为测试报告流）
+  // 视图切换（默认为用例集流）
   const [activeTab, setActiveTab] = useState<'reports' | 'cases'>('reports');
 
   // 搜索与过滤
@@ -290,19 +318,24 @@ export function App() {
   const [deleteCaseTarget, setDeleteCaseTarget] = useState<CaseDocument | null>(null);
   const [renameReportTarget, setRenameReportTarget] = useState<ReportSummary | null>(null);
 
-  /** 静默刷新资产与报告列表。 */
+  /** 静默刷新用例集、全体用例库与历史单用例资产。 */
   const refresh = useCallback(async () => {
     try {
-      const [reportData, caseData, runData] = await Promise.all([
+      const [reportData, allCaseData, caseData, runData] = await Promise.all([
         api<{ reports: ReportSummary[]; errors: { path: string; message: string }[] }>('/reports'),
+        api<{ cases: UnifiedCaseItem[]; errors: { path: string; message: string }[] }>(
+          '/all-cases',
+        ).catch(() => ({ cases: [], errors: [] })),
         api<{ cases: CaseDocument[]; errors: { path: string; message: string }[] }>('/cases'),
         api<{ runs: RunSummary[]; errors: { path: string; message: string }[] }>('/runs'),
       ]);
       setReports(reportData.reports);
+      setAllCases(allCaseData.cases);
       setCases(caseData.cases);
       setRuns(runData.runs);
       setErrors([
         ...reportData.errors.map((e) => `${e.path}: ${e.message}`),
+        ...allCaseData.errors.map((e) => `${e.path}: ${e.message}`),
         ...caseData.errors.map((e) => `${e.path}: ${e.message}`),
         ...runData.errors.map((e) => `${e.path}: ${e.message}`),
       ]);
@@ -446,31 +479,39 @@ export function App() {
     });
   }, [reports, reportSearch, reportStatusFilter]);
 
-  // 过滤用例列表
-  const filteredCases = useMemo(() => {
-    return cases.filter((doc) => {
-      const related = runs.filter((r) => r.caseId === doc.testCase.id);
-      const latest = related[0];
-      const latestStatus = latest ? (latest.verdict ?? latest.status) : 'pending';
-
+  // 过滤全体用例库列表
+  const filteredAllCases = useMemo(() => {
+    return allCases.filter((item) => {
       if (caseStatusFilter !== 'all') {
-        if (caseStatusFilter === 'pending' && latest) return false;
-        if (caseStatusFilter === 'passed' && latestStatus !== 'passed') return false;
-        if (caseStatusFilter === 'failed' && latestStatus !== 'failed') return false;
-        if (caseStatusFilter === 'running' && latestStatus !== 'running') return false;
+        if (caseStatusFilter === 'pending' && item.status !== 'pending') return false;
+        if (caseStatusFilter === 'passed' && item.status !== 'passed') return false;
+        if (caseStatusFilter === 'failed' && item.status !== 'failed') return false;
       }
 
       if (caseSearch.trim()) {
         const kw = caseSearch.trim().toLowerCase();
-        const matchTitle = doc.testCase.title.toLowerCase().includes(kw);
-        const matchId = doc.testCase.id.toLowerCase().includes(kw);
-        const matchTags = doc.testCase.tags?.some((t) => t.toLowerCase().includes(kw));
-        if (!matchTitle && !matchId && !matchTags) return false;
+        const matchTitle = item.title.toLowerCase().includes(kw);
+        const matchId = item.id.toLowerCase().includes(kw);
+        const matchCategory = item.category?.toLowerCase().includes(kw);
+        const matchSuiteTitle = item.suiteTitle?.toLowerCase().includes(kw);
+        const matchSuiteId = item.suiteId?.toLowerCase().includes(kw);
+        if (!matchTitle && !matchId && !matchCategory && !matchSuiteTitle && !matchSuiteId) {
+          return false;
+        }
       }
 
       return true;
     });
-  }, [cases, runs, caseStatusFilter, caseSearch]);
+  }, [allCases, caseStatusFilter, caseSearch]);
+
+  /** 打开全体用例库中的某个用例：属于用例集的跳转到用例集指挥舱并定位，独立用例进入单用例页面。 */
+  function handleOpenAllCase(item: UnifiedCaseItem) {
+    if (item.sourceType === 'suite' && item.suiteId) {
+      window.location.hash = `/reports/${encodeURIComponent(item.suiteId)}?case=${encodeURIComponent(item.id)}`;
+    } else {
+      window.location.hash = `/cases/${encodeURIComponent(item.id)}`;
+    }
+  }
 
   // 如果处于测试报告详情路由
   if (currentRoute?.type === 'report' && selectedReportDetail) {
@@ -486,6 +527,7 @@ export function App() {
         <main className="content">
           <ReportDetails
             report={selectedReportDetail}
+            initialCaseId={currentRoute.caseId}
             onBack={handleBackToList}
             onReportDeleted={() => {
               setReports((prev) => prev.filter((r) => r.runId !== selectedReportDetail.runId));
@@ -518,14 +560,14 @@ export function App() {
               className={`nav-tab ${activeTab === 'reports' ? 'active' : ''}`}
               onClick={() => setActiveTab('reports')}
             >
-              测试报告 <span>{reports.length}</span>
+              测试用例集 <span>{reports.length}</span>
             </button>
             <button
               type="button"
               className={`nav-tab ${activeTab === 'cases' ? 'active' : ''}`}
               onClick={() => setActiveTab('cases')}
             >
-              单用例库 <span>{cases.length}</span>
+              全体用例库 <span>{allCases.length}</span>
             </button>
           </div>
         )}
@@ -534,15 +576,15 @@ export function App() {
       <main className="content">
         {errors.length > 0 && <div className="error-panel">{errors.join('；')}</div>}
 
-        {/* 视图一：测试报告卡片流（默认主页） */}
+        {/* 视图一：测试用例集卡片流（默认主页） */}
         {!currentRoute && activeTab === 'reports' && (
           <section className="reports-page" aria-labelledby="reports-title">
             <div className="section-heading">
               <div>
-                <p className="page-subhead">TEST REPORTS</p>
-                <h1 id="reports-title">测试报告</h1>
+                <p className="page-subhead">TEST SUITES</p>
+                <h1 id="reports-title">测试用例集</h1>
               </div>
-              <span>{reports.length} 份报告</span>
+              <span>{reports.length} 个用例集</span>
             </div>
 
             <div className="search-filter-bar report-filter-row">
@@ -553,7 +595,7 @@ export function App() {
                 <input
                   type="text"
                   className="search-input"
-                  placeholder="搜索报告名称、摘要或 ID…"
+                  placeholder="搜索用例集名称、摘要或 ID…"
                   value={reportSearch}
                   onChange={(e) => setReportSearch(e.target.value)}
                 />
@@ -569,7 +611,7 @@ export function App() {
                 )}
               </div>
 
-              <div className="report-filter-pills" role="group" aria-label="报告状态筛选">
+              <div className="report-filter-pills" role="group" aria-label="用例集状态筛选">
                 <button
                   type="button"
                   className={`report-filter-pill ${reportStatusFilter === 'all' ? 'active' : ''}`}
@@ -595,18 +637,18 @@ export function App() {
             </div>
 
             {!loaded ? (
-              <div className="empty-state">正在读取测试报告…</div>
+              <div className="empty-state">正在读取测试用例集…</div>
             ) : reports.length === 0 ? (
               <div className="empty-state">
-                <span>暂无测试报告</span>
+                <span>暂无测试用例集</span>
                 <p style={{ marginTop: '8px', color: '#6b7280', fontSize: '14px' }}>
                   使用 Agent 执行测试并调用 <code>test submit</code> 或 <code>report submit</code>{' '}
-                  即可生成首份测试报告。
+                  即可生成首个用例集。
                 </p>
               </div>
             ) : filteredReports.length === 0 ? (
               <div className="empty-state">
-                <span>未找到匹配的测试报告</span>
+                <span>未找到匹配的测试用例集</span>
                 <button
                   type="button"
                   className="clear-filters-btn"
@@ -635,7 +677,8 @@ export function App() {
                       <div>
                         <div className="card-meta-line">
                           <p className="card-timestamp">{formatReportTime(report.startedAt)}</p>
-                          <span className="card-suite-tag">多用例批次</span>
+                          <span className="card-suite-tag">用例集</span>
+                          <span className="card-suite-id">ID: {report.runId}</span>
                         </div>
                         <h2 className="card-title">{report.title}</h2>
                       </div>
@@ -687,7 +730,7 @@ export function App() {
 
                     <div className="card-metrics-row">
                       <span>
-                        <b>{report.totals.total}</b> 用例
+                        <b>{report.totals.total}</b> 个小用例
                       </span>
                       <span className="passed">
                         <b>{report.totals.passed}</b> 通过
@@ -712,7 +755,18 @@ export function App() {
                         className="btn btn-primary"
                         onClick={() => openReport(report.runId)}
                       >
-                        查看详情
+                        进入用例集
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() =>
+                          void copyToClipboard(report.runId).then((ok) => {
+                            if (ok) showToast(`已复制用例集 ID: ${report.runId}`);
+                          })
+                        }
+                      >
+                        复制 ID
                       </button>
                       <button
                         type="button"
@@ -736,15 +790,15 @@ export function App() {
           </section>
         )}
 
-        {/* 视图二：独立用例库列表 */}
+        {/* 视图二：全体用例库列表（聚合全部用例集内小用例及独立用例） */}
         {!currentRoute && activeTab === 'cases' && (
           <section aria-labelledby="case-list-title">
             <div className="section-heading">
               <div>
-                <p className="page-subhead">TEST CASES</p>
-                <h1 id="case-list-title">测试用例库</h1>
+                <p className="page-subhead">ALL TEST CASES</p>
+                <h1 id="case-list-title">全体用例库</h1>
               </div>
-              <span>共 {cases.length} 个用例</span>
+              <span>共 {allCases.length} 个用例（聚合全部用例集及独立用例）</span>
             </div>
 
             <div className="search-filter-bar">
@@ -755,10 +809,20 @@ export function App() {
                 <input
                   type="text"
                   className="search-input"
-                  placeholder="搜索用例标题、ID 或标签…"
+                  placeholder="搜索小用例标题、ID、分类或所属用例集…"
                   value={caseSearch}
                   onChange={(e) => setCaseSearch(e.target.value)}
                 />
+                {caseSearch && (
+                  <button
+                    type="button"
+                    className="clear-search-btn"
+                    onClick={() => setCaseSearch('')}
+                    aria-label="清空搜索"
+                  >
+                    ×
+                  </button>
+                )}
               </div>
 
               <div className="status-filter-tabs" role="tablist" aria-label="用例状态筛选">
@@ -767,30 +831,30 @@ export function App() {
                   className={`filter-tab ${caseStatusFilter === 'all' ? 'active' : ''}`}
                   onClick={() => setCaseStatusFilter('all')}
                 >
-                  全部
+                  全部 ({allCases.length})
                 </button>
                 <button
                   type="button"
                   className={`filter-tab ${caseStatusFilter === 'passed' ? 'active' : ''}`}
                   onClick={() => setCaseStatusFilter('passed')}
                 >
-                  通过
+                  通过 ({allCases.filter((c) => c.status === 'passed').length})
                 </button>
                 <button
                   type="button"
                   className={`filter-tab ${caseStatusFilter === 'failed' ? 'active' : ''}`}
                   onClick={() => setCaseStatusFilter('failed')}
                 >
-                  失败
+                  失败 ({allCases.filter((c) => c.status === 'failed').length})
                 </button>
               </div>
             </div>
 
             {!loaded ? (
-              <div className="empty-state">正在读取…</div>
-            ) : cases.length === 0 ? (
+              <div className="empty-state">正在读取全体用例库…</div>
+            ) : allCases.length === 0 ? (
               <div className="empty-state">暂无测试用例</div>
-            ) : filteredCases.length === 0 ? (
+            ) : filteredAllCases.length === 0 ? (
               <div className="empty-state">
                 <span>未找到匹配的测试用例</span>
                 <button
@@ -806,50 +870,78 @@ export function App() {
               </div>
             ) : (
               <div className="case-list">
-                {filteredCases.map((document) => {
-                  const relatedRuns = runs.filter((item) => item.caseId === document.testCase.id);
-                  const latest = relatedRuns[0];
+                {filteredAllCases.map((item) => {
                   return (
-                    <div key={document.testCase.id} className="case-row-wrapper">
-                      <button
-                        type="button"
+                    <div
+                      key={`${item.sourceType}-${item.suiteId ?? 'root'}-${item.id}`}
+                      className="case-row-wrapper"
+                    >
+                      <div
                         className="case-row"
-                        onClick={() => {
-                          window.location.hash = `/cases/${encodeURIComponent(document.testCase.id)}`;
+                        onClick={() => handleOpenAllCase(item)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            handleOpenAllCase(item);
+                          }
                         }}
                       >
                         <span className="case-title">
                           <span className="case-name">
-                            <strong>{document.testCase.title}</strong>
-                            <span className="case-id">{document.testCase.id}</span>
+                            <strong>{item.title}</strong>
+                            <span className="case-id">{item.id}</span>
+                            {item.suiteId ? (
+                              <span
+                                className="case-suite-link-tag"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  window.location.hash = `/reports/${encodeURIComponent(item.suiteId!)}?case=${encodeURIComponent(item.id)}`;
+                                }}
+                                title={`所属用例集：${item.suiteTitle || item.suiteId}（点击跳转并定位）`}
+                              >
+                                🏷️ {item.suiteTitle || item.suiteId}
+                              </span>
+                            ) : (
+                              <span className="case-standalone-tag">独立用例</span>
+                            )}
                           </span>
                           <small>
-                            {document.testCase.steps.length} 个步骤 ·{' '}
-                            {document.testCase.steps.reduce(
-                              (count, step) => count + step.assertions.length,
-                              0,
-                            )}{' '}
-                            个检查点 · {relatedRuns.length} 次执行
+                            {item.stepCount} 个步骤 · {item.assertionCount} 个检查点
+                            {item.category && ` · 分类: ${item.category}`}
                           </small>
                         </span>
-                        <span className="case-latest">
-                          {latest ? (
-                            <>
-                              <span
-                                className={`status ${statusClass(latest.verdict ?? latest.status)}`}
-                              >
-                                {label(latest.verdict ?? latest.status)}
-                              </span>
-                              <small>{formatTime(latest.startedAt)}</small>
-                            </>
-                          ) : (
-                            <small>尚未执行</small>
-                          )}
-                        </span>
-                        <span className="chevron" aria-hidden="true">
-                          ›
-                        </span>
-                      </button>
+
+                        <div className="case-row-right">
+                          <span className="case-latest">
+                            <span className={`status ${statusClass(item.status)}`}>
+                              {label(item.status)}
+                            </span>
+                            {item.updatedAt ? (
+                              <small>{formatTime(item.updatedAt)}</small>
+                            ) : (
+                              <small>尚未执行</small>
+                            )}
+                          </span>
+                          <button
+                            type="button"
+                            className="row-copy-id-btn"
+                            title="复制小用例 ID"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void copyToClipboard(item.id).then((ok) => {
+                                if (ok) showToast(`已复制小用例 ID: ${item.id}`);
+                              });
+                            }}
+                          >
+                            📋 复制 ID
+                          </button>
+                          <span className="chevron" aria-hidden="true">
+                            ›
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   );
                 })}
@@ -979,7 +1071,7 @@ export function App() {
 
       {/* 弹窗挂载 */}
       {renameReportTarget && (
-        <RenameReportModal
+        <RenameSuiteModal
           reportSummary={renameReportTarget}
           onClose={() => setRenameReportTarget(null)}
           onSuccess={(upd) => {
@@ -1003,6 +1095,14 @@ export function App() {
           onClose={() => setDeleteCaseTarget(null)}
           onSuccess={() => handleDeleteSuccess(deleteCaseTarget.testCase.id)}
         />
+      )}
+
+      {/* 浮动 Toast 提示 */}
+      {toastMessage && (
+        <div className="casedock-toast" role="status">
+          <span className="toast-icon">✓</span>
+          <span>{toastMessage}</span>
+        </div>
       )}
     </div>
   );
