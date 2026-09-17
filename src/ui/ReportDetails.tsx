@@ -316,7 +316,8 @@ export function ReportDetails({
   onReportDeleted: (deletedRunId: string) => void;
 }) {
   const [report, setReport] = useState<Report>(initialReport);
-  const [selectedCaseIndex, setSelectedCaseIndex] = useState(0);
+  const [selectedCaseId, setSelectedCaseId] = useState<string>(initialReport.cases[0]?.id || '');
+  const [caseFilter, setCaseFilter] = useState<'all' | 'failed' | 'passed'>('all');
   const [viewMode, setViewMode] = useState<'final' | 'slides'>('final');
   const [slideIndex, setSlideIndex] = useState(0);
   const [lightboxSrc, setLightboxSrc] = useState<{ src: string; alt: string } | null>(null);
@@ -328,17 +329,34 @@ export function ReportDetails({
 
   useEffect(() => {
     setReport(initialReport);
-    setSelectedCaseIndex(0);
+    setSelectedCaseId(initialReport.cases[0]?.id || '');
     setSlideIndex(0);
   }, [initialReport]);
 
-  const currentCase: ReportCase | undefined = report.cases[selectedCaseIndex] || report.cases[0];
+  const currentCase: ReportCase | undefined =
+    report.cases.find((c) => c.id === selectedCaseId) || report.cases[0];
 
   // 当切换选中的用例时，重置步骤幻灯片索引
-  function handleSelectCase(index: number) {
-    setSelectedCaseIndex(index);
+  function handleSelectCase(id: string) {
+    setSelectedCaseId(id);
     setSlideIndex(0);
   }
+
+  // 过滤用例列表
+  const filteredCases = useMemo(() => {
+    if (caseFilter === 'failed') return report.cases.filter((c) => c.status === 'failed');
+    if (caseFilter === 'passed') return report.cases.filter((c) => c.status === 'passed');
+    return report.cases;
+  }, [report.cases, caseFilter]);
+
+  const failCount = useMemo(
+    () => report.cases.filter((c) => c.status === 'failed').length,
+    [report.cases],
+  );
+  const passCount = useMemo(
+    () => report.cases.filter((c) => c.status === 'passed').length,
+    [report.cases],
+  );
 
   // 获取证据图片的完整 URL
   function getEvidenceUrl(path?: string) {
@@ -367,7 +385,7 @@ export function ReportDetails({
         method: 'DELETE',
       });
       setReport(updated);
-      setSelectedCaseIndex(0);
+      setSelectedCaseId(updated.cases[0]?.id || '');
     } catch (err) {
       alert(err instanceof Error ? err.message : String(err));
     }
@@ -395,78 +413,165 @@ export function ReportDetails({
         ← 返回报告列表
       </button>
 
-      {/* 报告头部与主操作 */}
-      <div className="report-head">
-        <h1>{report.title}</h1>
-        <div className="actions">
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => setShowRenameReportModal(true)}
-          >
-            修改报告名称
-          </button>
-          <button type="button" className="btn btn-danger" onClick={handleDeleteReport}>
-            删除报告
-          </button>
+      {/* 顶部测试指挥舱看板 (Cockpit Hero) */}
+      <div className="cockpit-hero">
+        <div className="cockpit-hero-header">
+          <div className="cockpit-hero-title-group">
+            <div className="cockpit-hero-meta-badge">
+              <span className="hero-cockpit-tag">TEST COCKPIT</span>
+              <span className="hero-timestamp">开始 {formatReportTime(report.startedAt)}</span>
+              <span className={`badge ${report.status}`}>{reportStatusLabel(report.status)}</span>
+            </div>
+            <h1 className="cockpit-hero-title">{report.title}</h1>
+          </div>
+          <div className="cockpit-hero-actions">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setShowRenameReportModal(true)}
+            >
+              修改报告名称
+            </button>
+            <button type="button" className="btn btn-danger" onClick={handleDeleteReport}>
+              删除报告
+            </button>
+          </div>
+        </div>
+
+        {/* 指标看板网格 */}
+        <div className="cockpit-hero-grid">
+          {/* 左侧大号通过率得分卡 */}
+          <div className="hero-score-box">
+            <span className="hero-score-num">{report.totals.passRate}%</span>
+            <span className="hero-score-sub">通过率</span>
+            <span className="hero-score-label">综合评定</span>
+          </div>
+
+          {/* 中间 5 项核心指标柱 */}
+          <div className="hero-metrics-pillars">
+            <div className="hero-pillar">
+              <span className="pillar-label">用例总数</span>
+              <span className="pillar-value">{report.totals.total}</span>
+            </div>
+            <div className="hero-pillar pillar-passed">
+              <span className="pillar-label">通过</span>
+              <span className="pillar-value">{report.totals.passed}</span>
+            </div>
+            <div
+              className={`hero-pillar pillar-failed ${report.totals.failed > 0 ? 'has-failures' : ''}`}
+            >
+              <span className="pillar-label">失败</span>
+              <span className="pillar-value">{report.totals.failed}</span>
+            </div>
+            <div className="hero-pillar pillar-blocked">
+              <span className="pillar-label">阻塞</span>
+              <span className="pillar-value">{report.totals.blocked}</span>
+            </div>
+            <div className="hero-pillar pillar-skipped">
+              <span className="pillar-label">跳过</span>
+              <span className="pillar-value">{report.totals.skipped}</span>
+            </div>
+          </div>
+
+          {/* 右侧执行摘要说明 */}
+          <div className="hero-summary-block">
+            <div className="hero-summary-header">报告执行摘要</div>
+            <p className="hero-summary-text">{report.summary || '无额外测试摘要'}</p>
+          </div>
+        </div>
+
+        {/* 全宽多段进度胶囊条 */}
+        <div
+          className="cockpit-hero-bar-wrap"
+          title={`通过: ${report.totals.passed}, 失败: ${report.totals.failed}, 阻塞: ${report.totals.blocked}, 跳过: ${report.totals.skipped}`}
+        >
+          <div className="cockpit-progress-bar">
+            {report.totals.passed > 0 && (
+              <div
+                className="bar-seg bar-passed"
+                style={{
+                  width: `${(report.totals.passed / (report.totals.total || 1)) * 100}%`,
+                }}
+              />
+            )}
+            {report.totals.failed > 0 && (
+              <div
+                className="bar-seg bar-failed"
+                style={{
+                  width: `${(report.totals.failed / (report.totals.total || 1)) * 100}%`,
+                }}
+              />
+            )}
+            {report.totals.blocked > 0 && (
+              <div
+                className="bar-seg bar-blocked"
+                style={{
+                  width: `${(report.totals.blocked / (report.totals.total || 1)) * 100}%`,
+                }}
+              />
+            )}
+            {report.totals.skipped > 0 && (
+              <div
+                className="bar-seg bar-skipped"
+                style={{
+                  width: `${(report.totals.skipped / (report.totals.total || 1)) * 100}%`,
+                }}
+              />
+            )}
+          </div>
         </div>
       </div>
-
-      {/* 报告时间与总状态 */}
-      <div className="timing-bar">
-        <span>
-          开始 <b>{formatReportTime(report.startedAt)}</b>
-        </span>
-        <span className={`badge ${report.status}`}>{reportStatusLabel(report.status)}</span>
-      </div>
-
-      {/* 6 大指标看板卡片 */}
-      <div className="metrics-grid">
-        <div className="metric-box">
-          <b>{report.totals.total}</b>
-          <span>用例总数</span>
-        </div>
-        <div className="metric-box">
-          <b className="passed">{report.totals.passed}</b>
-          <span>通过</span>
-        </div>
-        <div className="metric-box">
-          <b className="failed">{report.totals.failed}</b>
-          <span>失败</span>
-        </div>
-        <div className="metric-box">
-          <b className="blocked">{report.totals.blocked}</b>
-          <span>阻塞</span>
-        </div>
-        <div className="metric-box">
-          <b className="skipped">{report.totals.skipped}</b>
-          <span>跳过</span>
-        </div>
-        <div className="metric-box pass-rate-box">
-          <b>{report.totals.passRate}%</b>
-          <span>通过率</span>
-        </div>
-      </div>
-
-      {/* 报告概括文本 */}
-      <p className="report-summary-text">{report.summary}</p>
 
       {/* 左右双栏大盘主体 */}
       <div className="report-main-layout">
-        {/* 左侧用例列表导航 */}
-        <nav className="case-nav-list" aria-label="用例列表导航">
-          {report.cases.map((c, idx) => (
-            <button
-              key={c.id || idx}
-              type="button"
-              className={`case-nav-item ${idx === selectedCaseIndex ? 'active' : ''}`}
-              onClick={() => handleSelectCase(idx)}
-            >
-              <span className="case-nav-title">{c.title}</span>
-              <span className={`badge badge-sm ${c.status}`}>{reportStatusLabel(c.status)}</span>
-            </button>
-          ))}
-        </nav>
+        {/* 左侧用例列表导航容器 */}
+        <div className="case-nav-container">
+          <div className="case-nav-header">
+            <div className="case-nav-header-row">
+              <span className="case-nav-header-title">用例导航</span>
+              <div className="case-nav-filter-pills" role="group" aria-label="用例快速过滤">
+                <button
+                  type="button"
+                  className={`case-filter-pill ${caseFilter === 'all' ? 'active' : ''}`}
+                  onClick={() => setCaseFilter('all')}
+                >
+                  全部 {report.cases.length}
+                </button>
+                <button
+                  type="button"
+                  className={`case-filter-pill pill-failed ${caseFilter === 'failed' ? 'active' : ''}`}
+                  onClick={() => setCaseFilter('failed')}
+                >
+                  失败 {failCount}
+                </button>
+                <button
+                  type="button"
+                  className={`case-filter-pill pill-passed ${caseFilter === 'passed' ? 'active' : ''}`}
+                  onClick={() => setCaseFilter('passed')}
+                >
+                  通过 {passCount}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <nav className="case-nav-list" aria-label="用例列表导航">
+            {filteredCases.map((c, idx) => (
+              <button
+                key={c.id || idx}
+                type="button"
+                className={`case-nav-item ${c.id === currentCase.id ? 'active' : ''}`}
+                onClick={() => handleSelectCase(c.id)}
+              >
+                <div className="case-nav-item-left">
+                  <span className="case-nav-num">{idx + 1}</span>
+                  <span className="case-nav-title">{c.title}</span>
+                </div>
+                <span className={`badge badge-sm ${c.status}`}>{reportStatusLabel(c.status)}</span>
+              </button>
+            ))}
+          </nav>
+        </div>
 
         {/* 右侧选中用例详情面板 */}
         <div className="case-detail-panel">
@@ -576,20 +681,38 @@ export function ReportDetails({
           {viewMode === 'final' && (
             <div className="final-evidence-view">
               {finalEvidenceStep?.screenshot ? (
-                <figure className="evidence-figure">
-                  <img
-                    src={getEvidenceUrl(finalEvidenceStep.screenshot)}
-                    alt={`步骤 ${finalEvidenceStep.index} 最终截图`}
-                    className="evidence-img clickable"
-                    onClick={() =>
-                      setLightboxSrc({
-                        src: getEvidenceUrl(finalEvidenceStep.screenshot),
-                        alt: `步骤 ${finalEvidenceStep.index} 最终截图`,
-                      })
-                    }
-                  />
-                  <figcaption>最终证据（步骤 {finalEvidenceStep.index}）</figcaption>
-                </figure>
+                <div className="browser-window-frame">
+                  <div className="browser-chrome">
+                    <div className="browser-dots">
+                      <span className="dot dot-red" />
+                      <span className="dot dot-yellow" />
+                      <span className="dot dot-green" />
+                    </div>
+                    <div className="browser-omnibox">
+                      <span className="omnibox-lock">🔒</span>
+                      <span className="omnibox-url">
+                        casedock://evidence/{currentCase.id}/step-{finalEvidenceStep.index}.png
+                      </span>
+                    </div>
+                    <span className="browser-view-tag">最终视口证据</span>
+                  </div>
+                  <div className="browser-viewport">
+                    <figure className="evidence-figure">
+                      <img
+                        src={getEvidenceUrl(finalEvidenceStep.screenshot)}
+                        alt={`步骤 ${finalEvidenceStep.index} 最终截图`}
+                        className="evidence-img clickable"
+                        onClick={() =>
+                          setLightboxSrc({
+                            src: getEvidenceUrl(finalEvidenceStep.screenshot),
+                            alt: `步骤 ${finalEvidenceStep.index} 最终截图`,
+                          })
+                        }
+                      />
+                      <figcaption>步骤 {finalEvidenceStep.index} 截图核验</figcaption>
+                    </figure>
+                  </div>
+                </div>
               ) : (
                 <div className="empty-evidence">该用例暂未包含截图证据</div>
               )}
@@ -625,18 +748,34 @@ export function ReportDetails({
 
               <article className="step-card">
                 {activeStep.screenshot ? (
-                  <div className="step-screenshot-wrap">
-                    <img
-                      src={getEvidenceUrl(activeStep.screenshot)}
-                      alt={`步骤 ${activeStep.index} 截图`}
-                      className="step-screenshot clickable"
-                      onClick={() =>
-                        setLightboxSrc({
-                          src: getEvidenceUrl(activeStep.screenshot),
-                          alt: `步骤 ${activeStep.index} 截图`,
-                        })
-                      }
-                    />
+                  <div className="browser-window-frame step-screenshot-wrap">
+                    <div className="browser-chrome">
+                      <div className="browser-dots">
+                        <span className="dot dot-red" />
+                        <span className="dot dot-yellow" />
+                        <span className="dot dot-green" />
+                      </div>
+                      <div className="browser-omnibox">
+                        <span className="omnibox-lock">🔒</span>
+                        <span className="omnibox-url">
+                          casedock://evidence/{currentCase.id}/step-{activeStep.index}.png
+                        </span>
+                      </div>
+                      <span className="browser-view-tag">步骤视口</span>
+                    </div>
+                    <div className="browser-viewport">
+                      <img
+                        src={getEvidenceUrl(activeStep.screenshot)}
+                        alt={`步骤 ${activeStep.index} 截图`}
+                        className="step-screenshot clickable"
+                        onClick={() =>
+                          setLightboxSrc({
+                            src: getEvidenceUrl(activeStep.screenshot),
+                            alt: `步骤 ${activeStep.index} 截图`,
+                          })
+                        }
+                      />
+                    </div>
                   </div>
                 ) : (
                   <div className="empty-step-shot">本步骤无截图</div>

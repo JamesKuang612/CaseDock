@@ -279,6 +279,7 @@ export function App() {
 
   // 搜索与过滤
   const [reportSearch, setReportSearch] = useState('');
+  const [reportStatusFilter, setReportStatusFilter] = useState<'all' | 'passed' | 'failed'>('all');
   const [caseSearch, setCaseSearch] = useState('');
   const [caseStatusFilter, setCaseStatusFilter] = useState<
     'all' | 'passed' | 'failed' | 'running' | 'pending'
@@ -437,11 +438,13 @@ export function App() {
   // 过滤报告列表
   const filteredReports = useMemo(() => {
     const kw = reportSearch.trim().toLowerCase();
-    if (!kw) return reports;
-    return reports.filter((r) =>
-      [r.title, r.summary, r.runId].join(' ').toLowerCase().includes(kw),
-    );
-  }, [reports, reportSearch]);
+    return reports.filter((r) => {
+      if (reportStatusFilter === 'passed' && r.status !== 'passed') return false;
+      if (reportStatusFilter === 'failed' && r.status !== 'failed') return false;
+      if (!kw) return true;
+      return [r.title, r.summary, r.runId].join(' ').toLowerCase().includes(kw);
+    });
+  }, [reports, reportSearch, reportStatusFilter]);
 
   // 过滤用例列表
   const filteredCases = useMemo(() => {
@@ -475,7 +478,9 @@ export function App() {
       <div className="app-shell">
         <header className="topbar">
           <button className="wordmark" onClick={handleBackToList} aria-label="返回首页">
-            CaseDock
+            <span className="wordmark-logo-icon">CD</span>
+            <span className="wordmark-text">CaseDock</span>
+            <span className="wordmark-badge">COCKPIT</span>
           </button>
         </header>
         <main className="content">
@@ -500,7 +505,9 @@ export function App() {
           onClick={handleBackToList}
           aria-label={currentRoute?.type === 'case' ? '返回测试用例' : '返回首页'}
         >
-          CaseDock
+          <span className="wordmark-logo-icon">CD</span>
+          <span className="wordmark-text">CaseDock</span>
+          <span className="wordmark-badge">COCKPIT</span>
         </button>
 
         {/* 仅在未进入详情时展示主导航 Tab */}
@@ -538,7 +545,7 @@ export function App() {
               <span>{reports.length} 份报告</span>
             </div>
 
-            <div className="search-filter-bar">
+            <div className="search-filter-bar report-filter-row">
               <div className="search-box">
                 <span className="search-icon" aria-hidden="true">
                   🔍
@@ -561,6 +568,30 @@ export function App() {
                   </button>
                 )}
               </div>
+
+              <div className="report-filter-pills" role="group" aria-label="报告状态筛选">
+                <button
+                  type="button"
+                  className={`report-filter-pill ${reportStatusFilter === 'all' ? 'active' : ''}`}
+                  onClick={() => setReportStatusFilter('all')}
+                >
+                  全部 ({reports.length})
+                </button>
+                <button
+                  type="button"
+                  className={`report-filter-pill ${reportStatusFilter === 'passed' ? 'active' : ''}`}
+                  onClick={() => setReportStatusFilter('passed')}
+                >
+                  全通过 ({reports.filter((r) => r.status === 'passed').length})
+                </button>
+                <button
+                  type="button"
+                  className={`report-filter-pill ${reportStatusFilter === 'failed' ? 'active' : ''}`}
+                  onClick={() => setReportStatusFilter('failed')}
+                >
+                  含失败 ({reports.filter((r) => r.status === 'failed').length})
+                </button>
+              </div>
             </div>
 
             {!loaded ? (
@@ -579,18 +610,33 @@ export function App() {
                 <button
                   type="button"
                   className="clear-filters-btn"
-                  onClick={() => setReportSearch('')}
+                  onClick={() => {
+                    setReportSearch('');
+                    setReportStatusFilter('all');
+                  }}
                 >
-                  重置搜索
+                  重置筛选条件
                 </button>
               </div>
             ) : (
               <div className="report-grid">
                 {filteredReports.map((report) => (
-                  <article key={report.runId} className="report-card">
+                  <article
+                    key={report.runId}
+                    className={`report-card ${
+                      report.status === 'failed'
+                        ? 'suite-failed'
+                        : report.status === 'passed'
+                          ? 'suite-passed'
+                          : ''
+                    }`}
+                  >
                     <div className="report-card-head">
                       <div>
-                        <p className="card-timestamp">{formatReportTime(report.startedAt)}</p>
+                        <div className="card-meta-line">
+                          <p className="card-timestamp">{formatReportTime(report.startedAt)}</p>
+                          <span className="card-suite-tag">多用例批次</span>
+                        </div>
                         <h2 className="card-title">{report.title}</h2>
                       </div>
                       <span className={`badge ${report.status}`}>
@@ -599,6 +645,45 @@ export function App() {
                     </div>
 
                     <p className="card-summary">{report.summary}</p>
+
+                    {/* 多段测试进度胶囊条 */}
+                    <div
+                      className="card-progress-bar"
+                      title={`通过: ${report.totals.passed}, 失败: ${report.totals.failed}, 阻塞: ${report.totals.blocked}, 跳过: ${report.totals.skipped}`}
+                    >
+                      {report.totals.passed > 0 && (
+                        <div
+                          className="bar-seg bar-passed"
+                          style={{
+                            width: `${(report.totals.passed / (report.totals.total || 1)) * 100}%`,
+                          }}
+                        />
+                      )}
+                      {report.totals.failed > 0 && (
+                        <div
+                          className="bar-seg bar-failed"
+                          style={{
+                            width: `${(report.totals.failed / (report.totals.total || 1)) * 100}%`,
+                          }}
+                        />
+                      )}
+                      {report.totals.blocked > 0 && (
+                        <div
+                          className="bar-seg bar-blocked"
+                          style={{
+                            width: `${(report.totals.blocked / (report.totals.total || 1)) * 100}%`,
+                          }}
+                        />
+                      )}
+                      {report.totals.skipped > 0 && (
+                        <div
+                          className="bar-seg bar-skipped"
+                          style={{
+                            width: `${(report.totals.skipped / (report.totals.total || 1)) * 100}%`,
+                          }}
+                        />
+                      )}
+                    </div>
 
                     <div className="card-metrics-row">
                       <span>
