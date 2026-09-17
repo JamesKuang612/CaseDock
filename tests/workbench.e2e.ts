@@ -117,6 +117,30 @@ test('只读页面从用例列表进入详情并展示执行证据', async (t) =
     tokenUsage: { total: 2048, source: 'Playwright fixture' },
   });
 
+  // 创建一份多用例批次测试报告供 E2E 验证
+  await store.submitReport({
+    title: 'E2E 批次测试报告',
+    cases: [
+      {
+        id: 'case-report-1',
+        title: '插件运行时的出口IP校验',
+        category: '开放平台 / 插件环境',
+        status: 'passed',
+        summary: 'IP校验成功返回 47.97.99.12',
+        steps: [
+          {
+            index: 1,
+            action: '打开插件配置',
+            expected: '显示配置项',
+            actual: '配置项已显示',
+            status: 'passed',
+            evidence: inbox,
+          },
+        ],
+      },
+    ],
+  });
+
   const server = await createServer(root, false, resolve('build/ui'));
   const address = await server.listen({ host: '127.0.0.1', port: 0 });
   const browser = await chromium.launch({
@@ -135,14 +159,41 @@ test('只读页面从用例列表进入详情并展示执行证据', async (t) =
   page.on('pageerror', (error) => pageErrors.push(error.message));
   await page.goto(address);
 
-  await expect(page.getByRole('heading', { name: '测试用例' })).toBeVisible();
+  // 1. 验证默认展示的测试报告卡片流
+  await expect(page.getByRole('heading', { name: '测试报告', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'E2E 批次测试报告' })).toBeVisible();
+  await expect(page.getByText('100% 通过率')).toBeVisible();
 
-  // 1. 验证搜索与筛选功能
+  // 2. 点击“查看详情”进入报告双栏大盘
+  await page.getByRole('button', { name: '查看详情' }).click();
+  await expect(page.getByText('用例总数')).toBeVisible();
+  await expect(page.getByText('100%').first()).toBeVisible();
+  await expect(page.getByRole('button', { name: '重跑' })).toBeVisible();
+
+  // 验证重跑一键复制弹窗
+  await page.getByRole('button', { name: '重跑' }).click();
+  await expect(page.getByRole('heading', { name: '重跑用例提示词' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '一键复制' })).toBeVisible();
+  await page.locator('.modal-footer').getByRole('button', { name: '关闭' }).click();
+
+  // 验证切换逐步记录
+  await page.getByRole('button', { name: '逐步记录' }).click();
+  await expect(page.getByText('1 / 1')).toBeVisible();
+
+  // 返回报告列表
+  await page.getByRole('button', { name: '← 返回报告列表' }).click();
+  await expect(page.getByRole('heading', { name: '测试报告', exact: true })).toBeVisible();
+
+  // 3. 切换到“单用例库” Tab
+  await page.getByRole('button', { name: /单用例库/ }).click();
+  await expect(page.getByRole('heading', { name: '测试用例库' })).toBeVisible();
+
+  // 验证搜索与筛选功能
   const searchInput = page.getByPlaceholder('搜索用例标题、ID 或标签…');
   await expect(searchInput).toBeVisible();
   await searchInput.fill('不存在的关键字_xyz');
   await expect(page.getByText('未找到匹配的测试用例')).toBeVisible();
-  await page.getByRole('button', { name: '重置搜索与筛选' }).click();
+  await searchInput.fill('');
   await expect(page.getByRole('button', { name: /工作台基本流程/ })).toBeVisible();
 
   await page.getByRole('button', { name: /工作台基本流程/ }).click();

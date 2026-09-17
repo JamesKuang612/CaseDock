@@ -1,13 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { CaseDocument, Run, RunSummary } from '../core/models';
+import type { CaseDocument, Report, ReportSummary, Run, RunSummary } from '../core/models';
 import { api } from './api';
 import { RunDetails, formatDuration, formatTokenUsage, label, statusClass } from './RunDetails';
-
-/** 从地址栏读取当前用例，使列表与详情成为可前进、后退的独立视图。 */
-function caseIdFromLocation() {
-  const match = window.location.hash.match(/^#\/cases\/([^/]+)$/);
-  return match ? decodeURIComponent(match[1]) : null;
-}
+import { ReportDetails, formatReportTime, reportStatusLabel } from './ReportDetails';
 
 /** 将 ISO 时间显示为本地日期与分钟，避免列表信息过密。 */
 function formatTime(value: string) {
@@ -20,7 +15,22 @@ function formatTime(value: string) {
   });
 }
 
-/** 用例重命名模态弹窗，仅允许修改用例标题，唯一 Case ID 锁死不可变。 */
+/** 从当前 URL（参数或 hash）解析目标路由。 */
+function routeFromLocation(): { type: 'report'; id: string } | { type: 'case'; id: string } | null {
+  const searchParams = new URLSearchParams(window.location.search);
+  const runParam = searchParams.get('run');
+  if (runParam) return { type: 'report', id: runParam };
+
+  const reportMatch = window.location.hash.match(/^#\/reports\/([^/]+)$/);
+  if (reportMatch) return { type: 'report', id: decodeURIComponent(reportMatch[1]) };
+
+  const caseMatch = window.location.hash.match(/^#\/cases\/([^/]+)$/);
+  if (caseMatch) return { type: 'case', id: decodeURIComponent(caseMatch[1]) };
+
+  return null;
+}
+
+/** 用例重命名模态弹窗，仅允许修改用例标题。 */
 function RenameModal({
   caseDoc,
   onClose,
@@ -105,8 +115,8 @@ function RenameModal({
   );
 }
 
-/** 用例删除二次确认模态弹窗，提醒用户删除操作不可撤回。 */
-function DeleteConfirmModal({
+/** 用例删除二次确认模态弹窗。 */
+function DeleteModal({
   caseDoc,
   onClose,
   onSuccess,
@@ -175,40 +185,126 @@ function DeleteConfirmModal({
   );
 }
 
-/** 提供只读的用例列表和用例执行详情，所有资产修改都由 Agent 完成。 */
+/** 报告重命名模态弹窗。 */
+function RenameReportModal({
+  reportSummary,
+  onClose,
+  onSuccess,
+}: {
+  reportSummary: ReportSummary;
+  onClose: () => void;
+  onSuccess: (updated: Report) => void;
+}) {
+  const [title, setTitle] = useState(reportSummary.title);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = title.trim();
+    if (!trimmed) {
+      setError('报告名称不能为空');
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const updated = await api<Report>(`/reports/${reportSummary.runId}`, {
+        method: 'PATCH',
+        body: { title: trimmed },
+      });
+      onSuccess(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose} role="dialog" aria-modal="true">
+      <div className="modal-dialog modal-small" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3>修改报告名称</h3>
+          <button type="button" className="close-btn" onClick={onClose} aria-label="关闭">
+            ×
+          </button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="modal-body">
+            {error && <div className="error-panel inline-error">{error}</div>}
+            <div className="form-group">
+              <label className="field-label" htmlFor="report-name-input">
+                报告名称
+              </label>
+              <input
+                id="report-name-input"
+                type="text"
+                className="text-input"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                autoFocus
+              />
+            </div>
+          </div>
+          <div className="modal-footer">
+            <button type="button" className="action-btn" onClick={onClose} disabled={saving}>
+              取消
+            </button>
+            <button type="submit" className="primary-btn" disabled={saving}>
+              {saving ? '保存中…' : '保存'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/** 提供测试报告流与独立用例库视图的主入口组件。 */
 export function App() {
+  const [reports, setReports] = useState<ReportSummary[]>([]);
   const [cases, setCases] = useState<CaseDocument[]>([]);
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [selectedCaseId, setSelectedCaseId] = useState(caseIdFromLocation);
-  const [selectedRun, setSelectedRun] = useState<Run | null>(null);
-  const runId = useRef<string | null>(null);
 
-  const [searchKeyword, setSearchKeyword] = useState('');
-  const [statusFilter, setStatusFilter] = useState<
+  // 路由状态
+  const [currentRoute, setCurrentRoute] = useState(routeFromLocation);
+  const [selectedReportDetail, setSelectedReportDetail] = useState<Report | null>(null);
+  const [selectedRun, setSelectedRun] = useState<Run | null>(null);
+  const activeRunIdRef = useRef<string | null>(null);
+
+  // 视图切换（默认为测试报告流）
+  const [activeTab, setActiveTab] = useState<'reports' | 'cases'>('reports');
+
+  // 搜索与过滤
+  const [reportSearch, setReportSearch] = useState('');
+  const [caseSearch, setCaseSearch] = useState('');
+  const [caseStatusFilter, setCaseStatusFilter] = useState<
     'all' | 'passed' | 'failed' | 'running' | 'pending'
   >('all');
-  const [renameTarget, setRenameTarget] = useState<CaseDocument | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<CaseDocument | null>(null);
 
-  /** 静默刷新资产列表；详情打开时同步刷新当前运行。 */
+  // 弹窗状态
+  const [renameCaseTarget, setRenameCaseTarget] = useState<CaseDocument | null>(null);
+  const [deleteCaseTarget, setDeleteCaseTarget] = useState<CaseDocument | null>(null);
+  const [renameReportTarget, setRenameReportTarget] = useState<ReportSummary | null>(null);
+
+  /** 静默刷新资产与报告列表。 */
   const refresh = useCallback(async () => {
     try {
-      const [caseData, runData] = await Promise.all([
+      const [reportData, caseData, runData] = await Promise.all([
+        api<{ reports: ReportSummary[]; errors: { path: string; message: string }[] }>('/reports'),
         api<{ cases: CaseDocument[]; errors: { path: string; message: string }[] }>('/cases'),
         api<{ runs: RunSummary[]; errors: { path: string; message: string }[] }>('/runs'),
       ]);
+      setReports(reportData.reports);
       setCases(caseData.cases);
       setRuns(runData.runs);
-      setErrors(
-        [...caseData.errors, ...runData.errors].map((item) => `${item.path}: ${item.message}`),
-      );
-      const id = runId.current;
-      if (id) {
-        const detail = await api<Run>(`/runs/${id}`);
-        if (runId.current === id) setSelectedRun(detail);
-      }
+      setErrors([
+        ...reportData.errors.map((e) => `${e.path}: ${e.message}`),
+        ...caseData.errors.map((e) => `${e.path}: ${e.message}`),
+        ...runData.errors.map((e) => `${e.path}: ${e.message}`),
+      ]);
     } catch (error) {
       setErrors([error instanceof Error ? error.message : String(error)]);
     } finally {
@@ -219,7 +315,6 @@ export function App() {
   useEffect(() => {
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
-    /** 串行轮询，避免慢请求期间叠加刷新。 */
     async function poll() {
       await refresh();
       if (!stopped) timer = setTimeout(poll, 4000);
@@ -231,86 +326,139 @@ export function App() {
     };
   }, [refresh]);
 
+  // 监听路由变化
   useEffect(() => {
-    /** 响应浏览器前进与后退，保持详情页可自然导航。 */
-    function route() {
-      setSelectedCaseId(caseIdFromLocation());
-      runId.current = null;
-      setSelectedRun(null);
+    function handleLocationChange() {
+      setCurrentRoute(routeFromLocation());
     }
-    window.addEventListener('hashchange', route);
-    return () => window.removeEventListener('hashchange', route);
+    window.addEventListener('hashchange', handleLocationChange);
+    window.addEventListener('popstate', handleLocationChange);
+    return () => {
+      window.removeEventListener('hashchange', handleLocationChange);
+      window.removeEventListener('popstate', handleLocationChange);
+    };
   }, []);
 
-  const selectedCase = cases.find((item) => item.testCase.id === selectedCaseId) ?? null;
+  // 当处于报告路由时，加载报告完整详情
+  useEffect(() => {
+    if (currentRoute?.type === 'report') {
+      const targetId = currentRoute.id;
+      void api<Report>(`/reports/${encodeURIComponent(targetId)}`)
+        .then((detail) => setSelectedReportDetail(detail))
+        .catch((err) => {
+          setErrors([`报告读取失败：${err instanceof Error ? err.message : String(err)}`]);
+        });
+    } else {
+      setSelectedReportDetail(null);
+    }
+  }, [currentRoute]);
+
+  const selectedCase =
+    currentRoute?.type === 'case'
+      ? (cases.find((item) => item.testCase.id === currentRoute.id) ?? null)
+      : null;
   const caseRuns = useMemo(
-    () => runs.filter((item) => item.caseId === selectedCaseId),
-    [runs, selectedCaseId],
+    () => (selectedCase ? runs.filter((item) => item.caseId === selectedCase.testCase.id) : []),
+    [runs, selectedCase],
   );
 
+  // 当处于单用例路由时，加载最新运行详情
   useEffect(() => {
     const firstRun = caseRuns[0];
-    if (!selectedCase || !firstRun || runId.current) return;
-    void openRun(firstRun.id);
-  }, [selectedCaseId, selectedCase, caseRuns]);
+    if (!selectedCase || !firstRun || activeRunIdRef.current) return;
+    activeRunIdRef.current = firstRun.id;
+    void api<Run>(`/runs/${firstRun.id}`)
+      .then((runDetail) => setSelectedRun(runDetail))
+      .catch((err) =>
+        setErrors([`运行读取失败：${err instanceof Error ? err.message : String(err)}`]),
+      );
+  }, [selectedCase, caseRuns]);
 
-  /** 加载一次执行详情，避免旧请求覆盖用户后来选择的记录。 */
+  /** 加载一次执行详情。 */
   async function openRun(id: string) {
-    runId.current = id;
+    activeRunIdRef.current = id;
     setSelectedRun(null);
     try {
       const detail = await api<Run>(`/runs/${id}`);
-      if (runId.current === id) setSelectedRun(detail);
+      if (activeRunIdRef.current === id) setSelectedRun(detail);
     } catch (error) {
-      if (runId.current === id) setErrors([error instanceof Error ? error.message : String(error)]);
+      if (activeRunIdRef.current === id)
+        setErrors([error instanceof Error ? error.message : String(error)]);
     }
   }
 
-  /** 打开用例详情页。 */
-  function openCase(id: string) {
-    window.location.hash = `/cases/${encodeURIComponent(id)}`;
+  /** 处理用例删除成功后的本地状态更新与路由返回。 */
+  function handleDeleteSuccess(deletedId: string) {
+    setCases((prev) => prev.filter((c) => c.testCase.id !== deletedId));
+    setDeleteCaseTarget(null);
+    if (currentRoute?.type === 'case' && currentRoute.id === deletedId) {
+      handleBackToList();
+    }
   }
 
-  /** 返回用例列表。 */
-  function closeCase() {
-    window.location.hash = '';
+  /** 处理用例重命名成功后的本地状态更新。 */
+  function handleRenameSuccess(updated: CaseDocument) {
+    setCases((prev) => prev.map((c) => (c.testCase.id === updated.testCase.id ? updated : c)));
+    setRenameCaseTarget(null);
   }
 
-  /** 计算用例各状态的统计数量。 */
-  const statusCounts = useMemo(() => {
-    const counts = { all: cases.length, passed: 0, failed: 0, running: 0, pending: 0 };
-    for (const doc of cases) {
-      const related = runs.filter((r) => r.caseId === doc.testCase.id);
-      const latest = related[0];
-      if (!latest) {
-        counts.pending += 1;
-      } else {
-        const s = latest.verdict ?? latest.status;
-        if (s === 'passed') counts.passed += 1;
-        else if (s === 'failed') counts.failed += 1;
-        else if (s === 'running') counts.running += 1;
-        else counts.pending += 1;
+  /** 打开指定的测试报告详情。 */
+  function openReport(runId: string) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('run', runId);
+    url.hash = '';
+    window.history.pushState({}, '', url.toString());
+    setCurrentRoute({ type: 'report', id: runId });
+  }
+
+  /** 返回报告或用例列表。 */
+  function handleBackToList() {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('run');
+    url.hash = '';
+    window.history.pushState({}, '', url.toString());
+    setCurrentRoute(null);
+  }
+
+  /** 删除某份报告。 */
+  async function handleDeleteReport(runId: string) {
+    if (!confirm(`确定彻底删除该测试报告及其所有关联证据吗？`)) return;
+    try {
+      await api(`/reports/${runId}`, { method: 'DELETE' });
+      setReports((prev) => prev.filter((r) => r.runId !== runId));
+      if (currentRoute?.type === 'report' && currentRoute.id === runId) {
+        handleBackToList();
       }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
     }
-    return counts;
-  }, [cases, runs]);
+  }
 
-  /** 根据搜索关键词与状态筛选过滤用例列表。 */
+  // 过滤报告列表
+  const filteredReports = useMemo(() => {
+    const kw = reportSearch.trim().toLowerCase();
+    if (!kw) return reports;
+    return reports.filter((r) =>
+      [r.title, r.summary, r.runId].join(' ').toLowerCase().includes(kw),
+    );
+  }, [reports, reportSearch]);
+
+  // 过滤用例列表
   const filteredCases = useMemo(() => {
     return cases.filter((doc) => {
       const related = runs.filter((r) => r.caseId === doc.testCase.id);
       const latest = related[0];
       const latestStatus = latest ? (latest.verdict ?? latest.status) : 'pending';
 
-      if (statusFilter !== 'all') {
-        if (statusFilter === 'pending' && latest) return false;
-        if (statusFilter === 'passed' && latestStatus !== 'passed') return false;
-        if (statusFilter === 'failed' && latestStatus !== 'failed') return false;
-        if (statusFilter === 'running' && latestStatus !== 'running') return false;
+      if (caseStatusFilter !== 'all') {
+        if (caseStatusFilter === 'pending' && latest) return false;
+        if (caseStatusFilter === 'passed' && latestStatus !== 'passed') return false;
+        if (caseStatusFilter === 'failed' && latestStatus !== 'failed') return false;
+        if (caseStatusFilter === 'running' && latestStatus !== 'running') return false;
       }
 
-      if (searchKeyword.trim()) {
-        const kw = searchKeyword.trim().toLowerCase();
+      if (caseSearch.trim()) {
+        const kw = caseSearch.trim().toLowerCase();
         const matchTitle = doc.testCase.title.toLowerCase().includes(kw);
         const matchId = doc.testCase.id.toLowerCase().includes(kw);
         const matchTags = doc.testCase.tags?.some((t) => t.toLowerCase().includes(kw));
@@ -319,43 +467,199 @@ export function App() {
 
       return true;
     });
-  }, [cases, runs, statusFilter, searchKeyword]);
+  }, [cases, runs, caseStatusFilter, caseSearch]);
 
-  /** 处理用例重命名成功后的本地状态更新。 */
-  function handleRenameSuccess(updated: CaseDocument) {
-    setCases((prev) => prev.map((c) => (c.testCase.id === updated.testCase.id ? updated : c)));
-    setRenameTarget(null);
-  }
-
-  /** 处理用例删除成功后的本地状态更新与路由返回。 */
-  function handleDeleteSuccess(deletedId: string) {
-    setCases((prev) => prev.filter((c) => c.testCase.id !== deletedId));
-    setDeleteTarget(null);
-    if (selectedCaseId === deletedId) {
-      closeCase();
-    }
+  // 如果处于测试报告详情路由
+  if (currentRoute?.type === 'report' && selectedReportDetail) {
+    return (
+      <div className="app-shell">
+        <header className="topbar">
+          <button className="wordmark" onClick={handleBackToList} aria-label="返回首页">
+            CaseDock
+          </button>
+        </header>
+        <main className="content">
+          <ReportDetails
+            report={selectedReportDetail}
+            onBack={handleBackToList}
+            onReportDeleted={() => {
+              setReports((prev) => prev.filter((r) => r.runId !== selectedReportDetail.runId));
+              handleBackToList();
+            }}
+          />
+        </main>
+      </div>
+    );
   }
 
   return (
     <div className="app-shell">
       <header className="topbar">
-        <button className="wordmark" onClick={closeCase} aria-label="返回测试用例">
+        <button
+          className="wordmark"
+          onClick={handleBackToList}
+          aria-label={currentRoute?.type === 'case' ? '返回测试用例' : '返回首页'}
+        >
           CaseDock
         </button>
+
+        {/* 仅在未进入详情时展示主导航 Tab */}
+        {!currentRoute && (
+          <div className="nav-tabs" role="tablist">
+            <button
+              type="button"
+              className={`nav-tab ${activeTab === 'reports' ? 'active' : ''}`}
+              onClick={() => setActiveTab('reports')}
+            >
+              测试报告 <span>{reports.length}</span>
+            </button>
+            <button
+              type="button"
+              className={`nav-tab ${activeTab === 'cases' ? 'active' : ''}`}
+              onClick={() => setActiveTab('cases')}
+            >
+              单用例库 <span>{cases.length}</span>
+            </button>
+          </div>
+        )}
       </header>
 
       <main className="content">
         {errors.length > 0 && <div className="error-panel">{errors.join('；')}</div>}
 
-        {!selectedCaseId ? (
+        {/* 视图一：测试报告卡片流（默认主页） */}
+        {!currentRoute && activeTab === 'reports' && (
+          <section className="reports-page" aria-labelledby="reports-title">
+            <div className="section-heading">
+              <div>
+                <p className="page-subhead">TEST REPORTS</p>
+                <h1 id="reports-title">测试报告</h1>
+              </div>
+              <span>{reports.length} 份报告</span>
+            </div>
+
+            <div className="search-filter-bar">
+              <div className="search-box">
+                <span className="search-icon" aria-hidden="true">
+                  🔍
+                </span>
+                <input
+                  type="text"
+                  className="search-input"
+                  placeholder="搜索报告名称、摘要或 ID…"
+                  value={reportSearch}
+                  onChange={(e) => setReportSearch(e.target.value)}
+                />
+                {reportSearch && (
+                  <button
+                    type="button"
+                    className="clear-search-btn"
+                    onClick={() => setReportSearch('')}
+                    aria-label="清空搜索"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {!loaded ? (
+              <div className="empty-state">正在读取测试报告…</div>
+            ) : reports.length === 0 ? (
+              <div className="empty-state">
+                <span>暂无测试报告</span>
+                <p style={{ marginTop: '8px', color: '#6b7280', fontSize: '14px' }}>
+                  使用 Agent 执行测试并调用 <code>test submit</code> 或 <code>report submit</code>{' '}
+                  即可生成首份测试报告。
+                </p>
+              </div>
+            ) : filteredReports.length === 0 ? (
+              <div className="empty-state">
+                <span>未找到匹配的测试报告</span>
+                <button
+                  type="button"
+                  className="clear-filters-btn"
+                  onClick={() => setReportSearch('')}
+                >
+                  重置搜索
+                </button>
+              </div>
+            ) : (
+              <div className="report-grid">
+                {filteredReports.map((report) => (
+                  <article key={report.runId} className="report-card">
+                    <div className="report-card-head">
+                      <div>
+                        <p className="card-timestamp">{formatReportTime(report.startedAt)}</p>
+                        <h2 className="card-title">{report.title}</h2>
+                      </div>
+                      <span className={`badge ${report.status}`}>
+                        {reportStatusLabel(report.status)}
+                      </span>
+                    </div>
+
+                    <p className="card-summary">{report.summary}</p>
+
+                    <div className="card-metrics-row">
+                      <span>
+                        <b>{report.totals.total}</b> 用例
+                      </span>
+                      <span className="passed">
+                        <b>{report.totals.passed}</b> 通过
+                      </span>
+                      <span className="failed">
+                        <b>{report.totals.failed}</b> 失败
+                      </span>
+                      <span className="blocked">
+                        <b>{report.totals.blocked}</b> 阻塞
+                      </span>
+                      <span className="skipped">
+                        <b>{report.totals.skipped}</b> 跳过
+                      </span>
+                      <span className="pass-rate">
+                        <b>{report.totals.passRate}%</b> 通过率
+                      </span>
+                    </div>
+
+                    <div className="card-actions">
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={() => openReport(report.runId)}
+                      >
+                        查看详情
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => setRenameReportTarget(report)}
+                      >
+                        修改
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-danger"
+                        onClick={() => void handleDeleteReport(report.runId)}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* 视图二：独立用例库列表 */}
+        {!currentRoute && activeTab === 'cases' && (
           <section aria-labelledby="case-list-title">
             <div className="section-heading">
-              <h1 id="case-list-title">测试用例</h1>
-              <span>
-                {filteredCases.length === cases.length
-                  ? `${cases.length} 个`
-                  : `显示 ${filteredCases.length} / 共 ${cases.length} 个`}
-              </span>
+              <div>
+                <p className="page-subhead">TEST CASES</p>
+                <h1 id="case-list-title">测试用例库</h1>
+              </div>
+              <span>共 {cases.length} 个用例</span>
             </div>
 
             <div className="search-filter-bar">
@@ -367,56 +671,32 @@ export function App() {
                   type="text"
                   className="search-input"
                   placeholder="搜索用例标题、ID 或标签…"
-                  value={searchKeyword}
-                  onChange={(e) => setSearchKeyword(e.target.value)}
+                  value={caseSearch}
+                  onChange={(e) => setCaseSearch(e.target.value)}
                 />
-                {searchKeyword && (
-                  <button
-                    type="button"
-                    className="clear-search-btn"
-                    onClick={() => setSearchKeyword('')}
-                    aria-label="清空搜索"
-                  >
-                    ×
-                  </button>
-                )}
               </div>
 
               <div className="status-filter-tabs" role="tablist" aria-label="用例状态筛选">
                 <button
                   type="button"
-                  className={`filter-tab ${statusFilter === 'all' ? 'active' : ''}`}
-                  onClick={() => setStatusFilter('all')}
+                  className={`filter-tab ${caseStatusFilter === 'all' ? 'active' : ''}`}
+                  onClick={() => setCaseStatusFilter('all')}
                 >
-                  全部 <span>{statusCounts.all}</span>
+                  全部
                 </button>
                 <button
                   type="button"
-                  className={`filter-tab ${statusFilter === 'passed' ? 'active' : ''}`}
-                  onClick={() => setStatusFilter('passed')}
+                  className={`filter-tab ${caseStatusFilter === 'passed' ? 'active' : ''}`}
+                  onClick={() => setCaseStatusFilter('passed')}
                 >
-                  通过 <span>{statusCounts.passed}</span>
+                  通过
                 </button>
                 <button
                   type="button"
-                  className={`filter-tab ${statusFilter === 'failed' ? 'active' : ''}`}
-                  onClick={() => setStatusFilter('failed')}
+                  className={`filter-tab ${caseStatusFilter === 'failed' ? 'active' : ''}`}
+                  onClick={() => setCaseStatusFilter('failed')}
                 >
-                  失败 <span>{statusCounts.failed}</span>
-                </button>
-                <button
-                  type="button"
-                  className={`filter-tab ${statusFilter === 'running' ? 'active' : ''}`}
-                  onClick={() => setStatusFilter('running')}
-                >
-                  执行中 <span>{statusCounts.running}</span>
-                </button>
-                <button
-                  type="button"
-                  className={`filter-tab ${statusFilter === 'pending' ? 'active' : ''}`}
-                  onClick={() => setStatusFilter('pending')}
-                >
-                  未执行 <span>{statusCounts.pending}</span>
+                  失败
                 </button>
               </div>
             </div>
@@ -428,39 +708,43 @@ export function App() {
             ) : filteredCases.length === 0 ? (
               <div className="empty-state">
                 <span>未找到匹配的测试用例</span>
-                {(searchKeyword || statusFilter !== 'all') && (
-                  <button
-                    type="button"
-                    className="clear-filters-btn"
-                    onClick={() => {
-                      setSearchKeyword('');
-                      setStatusFilter('all');
-                    }}
-                  >
-                    重置搜索与筛选
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className="clear-filters-btn"
+                  onClick={() => {
+                    setCaseSearch('');
+                    setCaseStatusFilter('all');
+                  }}
+                >
+                  重置搜索与筛选
+                </button>
               </div>
             ) : (
               <div className="case-list">
                 {filteredCases.map((document) => {
                   const relatedRuns = runs.filter((item) => item.caseId === document.testCase.id);
                   const latest = relatedRuns[0];
-                  const assertionCount = document.testCase.steps.reduce(
-                    (count, step) => count + step.assertions.length,
-                    0,
-                  );
                   return (
-                    <div className="case-row-wrapper" key={document.testCase.id}>
-                      <button className="case-row" onClick={() => openCase(document.testCase.id)}>
+                    <div key={document.testCase.id} className="case-row-wrapper">
+                      <button
+                        type="button"
+                        className="case-row"
+                        onClick={() => {
+                          window.location.hash = `/cases/${encodeURIComponent(document.testCase.id)}`;
+                        }}
+                      >
                         <span className="case-title">
                           <span className="case-name">
                             <strong>{document.testCase.title}</strong>
                             <span className="case-id">{document.testCase.id}</span>
                           </span>
                           <small>
-                            {document.testCase.steps.length} 个步骤 · {assertionCount} 个检查点 ·{' '}
-                            {relatedRuns.length} 次执行
+                            {document.testCase.steps.length} 个步骤 ·{' '}
+                            {document.testCase.steps.reduce(
+                              (count, step) => count + step.assertions.length,
+                              0,
+                            )}{' '}
+                            个检查点 · {relatedRuns.length} 次执行
                           </small>
                         </span>
                         <span className="case-latest">
@@ -481,163 +765,160 @@ export function App() {
                           ›
                         </span>
                       </button>
-                      <div className="case-item-actions">
-                        <button
-                          type="button"
-                          className="item-action-btn"
-                          title="修改用例名称"
-                          aria-label="修改用例名称"
-                          onClick={() => setRenameTarget(document)}
-                        >
-                          ✎
-                        </button>
-                        <button
-                          type="button"
-                          className="item-action-btn delete-action-btn"
-                          title="删除用例"
-                          aria-label="删除用例"
-                          onClick={() => setDeleteTarget(document)}
-                        >
-                          🗑
-                        </button>
-                      </div>
                     </div>
                   );
                 })}
               </div>
             )}
           </section>
-        ) : selectedCase ? (
-          <section>
-            <button className="back-button" onClick={closeCase}>
-              ← 返回测试用例
-            </button>
-            <div className="detail-heading">
-              <div className="detail-title">
-                <h1>{selectedCase.testCase.title}</h1>
-                <span className="case-id">{selectedCase.testCase.id}</span>
-                <div className="detail-actions">
-                  <button
-                    type="button"
-                    className="detail-action-btn"
-                    onClick={() => setRenameTarget(selectedCase)}
-                  >
-                    ✎ 修改名称
-                  </button>
-                  <button
-                    type="button"
-                    className="detail-action-btn delete-btn"
-                    onClick={() => setDeleteTarget(selectedCase)}
-                  >
-                    🗑 删除用例
-                  </button>
-                </div>
-              </div>
-              <span>
-                {selectedCase.testCase.steps.length} 个步骤 · {caseRuns.length} 次执行
-              </span>
-            </div>
+        )}
 
-            <section className="panel case-definition">
-              <h2>用例内容</h2>
-              {selectedCase.testCase.source && (
-                <div className="source-block">
-                  <h3>原始内容</h3>
-                  <div className="source-content">{selectedCase.testCase.source}</div>
+        {/* 视图三：单用例详情视图 */}
+        {currentRoute?.type === 'case' &&
+          (selectedCase ? (
+            <section>
+              <button className="back-button" onClick={handleBackToList}>
+                ← 返回测试用例
+              </button>
+              <div className="detail-heading">
+                <div className="detail-title">
+                  <h1>{selectedCase.testCase.title}</h1>
+                  <span className="case-id">{selectedCase.testCase.id}</span>
+                  <div className="detail-actions">
+                    <button
+                      type="button"
+                      className="detail-action-btn"
+                      onClick={() => setRenameCaseTarget(selectedCase)}
+                    >
+                      ✎ 修改名称
+                    </button>
+                    <button
+                      type="button"
+                      className="detail-action-btn delete-btn"
+                      onClick={() => setDeleteCaseTarget(selectedCase)}
+                    >
+                      🗑 删除用例
+                    </button>
+                  </div>
                 </div>
-              )}
-              <div className={selectedCase.testCase.source ? 'parsed-block' : ''}>
-                {selectedCase.testCase.source && <h3>用例结构</h3>}
-                {selectedCase.testCase.preconditions.length > 0 && (
-                  <div className="preconditions">
-                    <h3>前置条件</h3>
-                    <ul>
-                      {selectedCase.testCase.preconditions.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
+                <span>
+                  {selectedCase.testCase.steps.length} 个步骤 · {caseRuns.length} 次执行
+                </span>
+              </div>
+
+              <section className="panel case-definition">
+                <h2>用例内容</h2>
+                {selectedCase.testCase.source && (
+                  <div className="source-block">
+                    <h3>原始内容</h3>
+                    <div className="source-content">{selectedCase.testCase.source}</div>
                   </div>
                 )}
-                <div className="definition-steps">
-                  {selectedCase.testCase.steps.map((step, index) => (
-                    <div className="definition-step" key={step.id}>
-                      <span className="step-number">{index + 1}</span>
-                      <div>
-                        <strong>{step.action}</strong>
-                        {step.assertions.map((assertion) => (
-                          <p key={assertion.id}>{assertion.expect}</p>
+                <div className={selectedCase.testCase.source ? 'parsed-block' : ''}>
+                  {selectedCase.testCase.source && <h3>用例结构</h3>}
+                  {selectedCase.testCase.preconditions.length > 0 && (
+                    <div className="preconditions">
+                      <h3>前置条件</h3>
+                      <ul>
+                        {selectedCase.testCase.preconditions.map((item) => (
+                          <li key={item}>{item}</li>
                         ))}
-                      </div>
+                      </ul>
                     </div>
-                  ))}
-                </div>
-              </div>
-            </section>
-
-            <section className="panel">
-              <h2>执行记录</h2>
-              {caseRuns.length === 0 ? (
-                <div className="empty-inline">尚未执行</div>
-              ) : (
-                <div className="run-list">
-                  <div className="run-list-head" aria-hidden="true">
-                    <span>结果</span>
-                    <span>测试时间</span>
-                    <span>测试耗时</span>
-                    <span>Token 消耗</span>
-                    <span>执行者</span>
+                  )}
+                  <div className="definition-steps">
+                    {selectedCase.testCase.steps.map((step, index) => (
+                      <div className="definition-step" key={step.id}>
+                        <span className="step-number">{index + 1}</span>
+                        <div>
+                          <strong>{step.action}</strong>
+                          {step.assertions.map((assertion) => (
+                            <p key={assertion.id}>{assertion.expect}</p>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  {caseRuns.map((item) => (
-                    <button
-                      className={`run-row ${runId.current === item.id ? 'selected' : ''}`}
-                      key={item.id}
-                      onClick={() => void openRun(item.id)}
-                    >
-                      <span className={`status ${statusClass(item.verdict ?? item.status)}`}>
-                        {label(item.verdict ?? item.status)}
-                      </span>
-                      <span>{formatTime(item.startedAt)}</span>
-                      <span>{formatDuration(item.startedAt, item.finishedAt)}</span>
-                      <span>{formatTokenUsage(item.tokenUsage)}</span>
-                      <span>{item.executor.agent}</span>
-                    </button>
-                  ))}
                 </div>
+              </section>
+
+              <section className="panel">
+                <h2>执行记录</h2>
+                {caseRuns.length === 0 ? (
+                  <div className="empty-inline">尚未执行</div>
+                ) : (
+                  <div className="run-list">
+                    <div className="run-list-head" aria-hidden="true">
+                      <span>结果</span>
+                      <span>测试时间</span>
+                      <span>测试耗时</span>
+                      <span>Token 消耗</span>
+                      <span>执行者</span>
+                    </div>
+                    {caseRuns.map((item) => (
+                      <button
+                        className={`run-row ${activeRunIdRef.current === item.id ? 'selected' : ''}`}
+                        key={item.id}
+                        onClick={() => void openRun(item.id)}
+                      >
+                        <span className={`status ${statusClass(item.verdict ?? item.status)}`}>
+                          {label(item.verdict ?? item.status)}
+                        </span>
+                        <span>{formatTime(item.startedAt)}</span>
+                        <span>{formatDuration(item.startedAt, item.finishedAt)}</span>
+                        <span>{formatTokenUsage(item.tokenUsage)}</span>
+                        <span>{item.executor.agent}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              {selectedRun && (
+                <section className="panel run-panel">
+                  <RunDetails run={selectedRun} />
+                </section>
               )}
             </section>
-
-            {runId.current && (
-              <section className="panel run-panel">
-                {selectedRun ? <RunDetails run={selectedRun} /> : <div>正在读取…</div>}
-              </section>
-            )}
-          </section>
-        ) : loaded ? (
-          <div className="empty-state">
-            找不到这个测试用例
-            <button className="back-button" onClick={closeCase}>
-              返回列表
-            </button>
-          </div>
-        ) : (
-          <div className="empty-state">正在读取…</div>
-        )}
-        {renameTarget && (
-          <RenameModal
-            caseDoc={renameTarget}
-            onClose={() => setRenameTarget(null)}
-            onSuccess={handleRenameSuccess}
-          />
-        )}
-
-        {deleteTarget && (
-          <DeleteConfirmModal
-            caseDoc={deleteTarget}
-            onClose={() => setDeleteTarget(null)}
-            onSuccess={() => handleDeleteSuccess(deleteTarget.testCase.id)}
-          />
-        )}
+          ) : loaded ? (
+            <div className="empty-state">
+              找不到这个测试用例
+              <button className="back-button" onClick={handleBackToList}>
+                返回列表
+              </button>
+            </div>
+          ) : (
+            <div className="empty-state">正在读取…</div>
+          ))}
       </main>
+
+      {/* 弹窗挂载 */}
+      {renameReportTarget && (
+        <RenameReportModal
+          reportSummary={renameReportTarget}
+          onClose={() => setRenameReportTarget(null)}
+          onSuccess={(upd) => {
+            setReports((prev) =>
+              prev.map((r) => (r.runId === upd.runId ? { ...r, title: upd.title } : r)),
+            );
+            setRenameReportTarget(null);
+          }}
+        />
+      )}
+      {renameCaseTarget && (
+        <RenameModal
+          caseDoc={renameCaseTarget}
+          onClose={() => setRenameCaseTarget(null)}
+          onSuccess={handleRenameSuccess}
+        />
+      )}
+      {deleteCaseTarget && (
+        <DeleteModal
+          caseDoc={deleteCaseTarget}
+          onClose={() => setDeleteCaseTarget(null)}
+          onSuccess={() => handleDeleteSuccess(deleteCaseTarget.testCase.id)}
+        />
+      )}
     </div>
   );
 }

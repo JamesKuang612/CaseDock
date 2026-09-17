@@ -55795,6 +55795,133 @@ var schemas = {
       receipts: array(object({ requestId: id, digest: hash }))
     },
     ["environment", "initialUrl", "targetUrl", "credentials", "tokenUsage"]
+  ),
+  report: object(
+    {
+      schemaVersion: { const: 2 },
+      runId: id,
+      title: text,
+      status: { type: "string", enum: ["passed", "failed", "blocked", "skipped"] },
+      startedAt: text,
+      finishedAt: text,
+      durationMs: { type: "number", minimum: 0 },
+      summary: { type: "string" },
+      input: object(
+        {
+          sourceName: text,
+          file: { type: "string" },
+          type: text
+        },
+        ["file"]
+      ),
+      totals: object({
+        total: { type: "integer", minimum: 0 },
+        passed: { type: "integer", minimum: 0 },
+        failed: { type: "integer", minimum: 0 },
+        blocked: { type: "integer", minimum: 0 },
+        skipped: { type: "integer", minimum: 0 },
+        passRate: { type: "number", minimum: 0, maximum: 100 }
+      }),
+      cases: array(
+        object(
+          {
+            id: text,
+            title: text,
+            category: { type: "string" },
+            testData: { type: "string" },
+            definition: object(
+              {
+                name: text,
+                category: { type: "string" },
+                testData: { type: "string" },
+                steps: array({ type: "string" }),
+                assertions: array({ type: "string" })
+              },
+              ["name", "category", "testData", "steps", "assertions"]
+            ),
+            status: { type: "string", enum: ["passed", "failed", "blocked", "skipped"] },
+            summary: { type: "string" },
+            startedAt: text,
+            durationMs: { type: "number", minimum: 0 },
+            steps: array(
+              object(
+                {
+                  index: { type: "integer", minimum: 1 },
+                  action: text,
+                  expected: { type: "string" },
+                  actual: text,
+                  status: { type: "string", enum: ["passed", "failed", "blocked", "skipped"] },
+                  screenshot: {
+                    type: "string",
+                    pattern: "^evidence/[^/]+\\.(png|jpg|jpeg|webp)$"
+                  }
+                },
+                ["expected", "screenshot"]
+              ),
+              1
+            )
+          },
+          ["category", "testData", "startedAt", "durationMs"]
+        ),
+        1
+      )
+    },
+    ["finishedAt", "durationMs"]
+  ),
+  submitReport: object(
+    {
+      schemaVersion: { const: 2 },
+      title: text,
+      input: object(
+        {
+          sourceName: text,
+          file: { type: "string" },
+          type: text
+        },
+        ["sourceName", "file", "type"]
+      ),
+      cases: array(
+        object(
+          {
+            id: text,
+            title: text,
+            category: { type: "string" },
+            testData: { type: "string" },
+            definition: object(
+              {
+                name: text,
+                category: { type: "string" },
+                testData: { type: "string" },
+                steps: array({ type: "string" }),
+                assertions: array({ type: "string" })
+              },
+              ["name", "category", "testData", "steps", "assertions"]
+            ),
+            status: { type: "string", enum: ["passed", "failed", "blocked", "skipped"] },
+            summary: { type: "string" },
+            startedAt: text,
+            durationMs: { type: "number", minimum: 0 },
+            steps: array(
+              object(
+                {
+                  index: { type: "integer", minimum: 1 },
+                  action: text,
+                  expected: { type: "string" },
+                  actual: text,
+                  status: { type: "string", enum: ["passed", "failed", "blocked", "skipped"] },
+                  evidence: { type: "string" }
+                },
+                ["expected", "evidence"]
+              ),
+              1
+            )
+          },
+          ["id", "category", "testData", "definition", "startedAt", "durationMs"]
+        ),
+        1
+      )
+    },
+    ["schemaVersion", "input"]
   )
 };
 var ajv = new import_ajv.Ajv({ allErrors: true });
@@ -56538,6 +56665,7 @@ var Store = class {
       }
       await mkdir2(await safePath(this.root, "cases"), { recursive: true });
       await mkdir2(await safePath(this.root, "runs"), { recursive: true });
+      await mkdir2(await safePath(this.root, "reports"), { recursive: true });
       await mkdir2(await safePath(this.root, ".casedock/inbox"), { recursive: true });
       const ignore = await safePath(this.root, ".gitignore");
       const current = await optionalText(ignore) ?? "";
@@ -56549,9 +56677,269 @@ var Store = class {
         ...await this.getWorkspace(),
         casesDirectory: "cases",
         runsDirectory: "runs",
+        reportsDirectory: "reports",
         inbox: ".casedock/inbox"
       };
     });
+  }
+  /** 一次性提交包含多条用例的批次测试报告，校验截图后原子发布。 */
+  async submitReport(input) {
+    const value = validate("submitReport", input);
+    const startedAt = /* @__PURE__ */ new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    const stamp = `${startedAt.getFullYear()}${pad(startedAt.getMonth() + 1)}${pad(startedAt.getDate())}-${pad(startedAt.getHours())}${pad(startedAt.getMinutes())}${pad(startedAt.getSeconds())}`;
+    const runId = `report-${stamp}-${randomUUID2().slice(0, 8)}`;
+    checkId(runId);
+    return withWriteLock(this.root, async () => {
+      const artifactFiles = /* @__PURE__ */ new Map();
+      const sourceCache = /* @__PURE__ */ new Map();
+      const processedCases = [];
+      for (let caseIndex = 0; caseIndex < value.cases.length; caseIndex++) {
+        const rawCase = value.cases[caseIndex];
+        const caseId = rawCase.id || `case-${caseIndex + 1}`;
+        checkId(caseId);
+        const steps = [];
+        for (const rawStep of rawCase.steps) {
+          let screenshotPath;
+          if (rawStep.evidence) {
+            let inspected = sourceCache.get(rawStep.evidence);
+            if (!inspected) {
+              const bytes = await readBounded(
+                await safePath(this.root, rawStep.evidence),
+                20 * 1024 * 1024
+              );
+              if (!bytes.length) throw new CoreError("VALIDATION", "\u4E0D\u80FD\u767B\u8BB0\u7A7A\u8BC1\u636E");
+              const format = inspectScreenshot(bytes);
+              inspected = { bytes, ...format };
+              sourceCache.set(rawStep.evidence, inspected);
+            }
+            const filename = `case-${caseIndex + 1}-step-${rawStep.index}-${randomUUID2().slice(0, 6)}.${inspected.extension}`;
+            screenshotPath = `evidence/${filename}`;
+            artifactFiles.set(screenshotPath, inspected.bytes);
+          }
+          steps.push({
+            index: rawStep.index,
+            action: rawStep.action,
+            expected: rawStep.expected || "",
+            actual: rawStep.actual,
+            status: rawStep.status,
+            ...screenshotPath ? { screenshot: screenshotPath } : {}
+          });
+        }
+        const caseDefinition = {
+          name: rawCase.definition?.name || rawCase.title,
+          category: rawCase.definition?.category || rawCase.category || "\u672A\u5206\u7C7B",
+          testData: rawCase.definition?.testData || rawCase.testData || "",
+          steps: rawCase.definition?.steps || steps.map((s) => s.action),
+          assertions: rawCase.definition?.assertions || steps.map((s) => s.expected).filter((e) => Boolean(e))
+        };
+        const caseStartedAt = rawCase.startedAt || startedAt.toISOString();
+        const caseDurationMs = rawCase.durationMs !== void 0 ? rawCase.durationMs : Math.max(0, Date.now() - new Date(caseStartedAt).getTime());
+        processedCases.push({
+          id: caseId,
+          title: rawCase.title,
+          category: rawCase.category || "\u672A\u5206\u7C7B",
+          testData: rawCase.testData || "",
+          definition: caseDefinition,
+          status: rawCase.status,
+          summary: rawCase.summary,
+          startedAt: caseStartedAt,
+          durationMs: caseDurationMs,
+          steps
+        });
+      }
+      const total = processedCases.length;
+      const counts = {
+        passed: processedCases.filter((c) => c.status === "passed").length,
+        failed: processedCases.filter((c) => c.status === "failed").length,
+        blocked: processedCases.filter((c) => c.status === "blocked").length,
+        skipped: processedCases.filter((c) => c.status === "skipped").length
+      };
+      const passRate = total > 0 ? Number((counts.passed / total * 100).toFixed(1)) : 0;
+      const reportStatus = counts.failed > 0 ? "failed" : counts.blocked > 0 ? "blocked" : counts.passed === total ? "passed" : "skipped";
+      const summaryText = `\u5171 ${total} \u6761\u7528\u4F8B\uFF1A${counts.passed} \u6761\u901A\u8FC7\uFF0C${counts.failed} \u6761\u5931\u8D25\uFF0C${counts.blocked} \u6761\u963B\u585E\uFF0C${counts.skipped} \u6761\u8DF3\u8FC7\u3002`;
+      const inputSource = {
+        sourceName: value.input?.sourceName || value.title,
+        file: value.input?.file || "",
+        type: value.input?.type || "batch"
+      };
+      const report = {
+        schemaVersion: 2,
+        runId,
+        title: value.title,
+        status: reportStatus,
+        startedAt: startedAt.toISOString(),
+        finishedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        durationMs: Math.max(0, Date.now() - startedAt.getTime()),
+        summary: summaryText,
+        input: inputSource,
+        totals: {
+          total,
+          ...counts,
+          passRate
+        },
+        cases: processedCases
+      };
+      validate("report", report);
+      const reportContent = JSON.stringify(report, null, 2);
+      if (Buffer.byteLength(reportContent) > 10 * 1024 * 1024)
+        throw new CoreError("FILE_SIZE", "\u6D4B\u8BD5\u62A5\u544A\u603B\u5927\u5C0F\u8D85\u8FC7 10 MiB\uFF0C\u8BF7\u7F29\u51CF\u6B65\u9AA4\u6216\u62C6\u5206\u6279\u6B21");
+      const transaction = `.casedock/staging/${runId}`;
+      const stagedReport = await safePath(this.root, `${transaction}/report.json`);
+      const finalDir = await safePath(this.root, `reports/${runId}`);
+      try {
+        await mkdir2(await safePath(this.root, `${transaction}/evidence`), { recursive: true });
+        await atomicWrite(stagedReport, reportContent);
+        for (const [relPath, bytes] of artifactFiles) {
+          await atomicWrite(await safePath(this.root, `${transaction}/${relPath}`), bytes);
+        }
+        await mkdir2(await safePath(this.root, "reports"), { recursive: true });
+        await rename2(await safePath(this.root, transaction), finalDir);
+      } catch (error) {
+        await rm2(await safePath(this.root, transaction), { recursive: true, force: true });
+        throw error;
+      }
+      return {
+        runId,
+        title: report.title,
+        status: report.status,
+        reportPath: `reports/${runId}/report.json`,
+        evidenceDirectory: `reports/${runId}/evidence`,
+        totals: report.totals
+      };
+    });
+  }
+  /** 读取并校验指定的测试报告。 */
+  async getReport(id2) {
+    checkId(id2);
+    const path4 = `reports/${id2}/report.json`;
+    let bytes;
+    try {
+      bytes = await readBounded(await safePath(this.root, path4), 10 * 1024 * 1024);
+    } catch (error) {
+      if (isFsError(error, "ENOENT")) throw new CoreError("NOT_FOUND", `\u627E\u4E0D\u5230\u62A5\u544A ${id2}`);
+      throw error;
+    }
+    const raw = JSON.parse(bytes.toString("utf8"));
+    const report = validate("report", raw);
+    if (report.runId !== id2) throw new CoreError("VALIDATION", "\u62A5\u544A ID \u5FC5\u987B\u4E0E\u76EE\u5F55\u540D\u4E00\u81F4");
+    return report;
+  }
+  /** 列出所有测试报告摘要，按开始时间倒序排列。 */
+  async listReports() {
+    const reports2 = [];
+    const errors = [];
+    const names = (await this.names("reports", "")).filter(isId);
+    for (const name of names) {
+      try {
+        const report = await this.getReport(name);
+        reports2.push({
+          runId: report.runId,
+          title: report.title,
+          status: report.status,
+          startedAt: report.startedAt,
+          summary: report.summary,
+          totals: report.totals,
+          input: report.input
+        });
+      } catch (error) {
+        errors.push({
+          path: `reports/${name}`,
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+    return { reports: reports2.sort((a, b) => b.startedAt.localeCompare(a.startedAt)), errors };
+  }
+  /** 修改报告标题。 */
+  async renameReport(id2, title) {
+    checkId(id2);
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) throw new CoreError("VALIDATION", "\u62A5\u544A\u540D\u79F0\u4E0D\u80FD\u4E3A\u7A7A");
+    if (trimmedTitle.length > 200) throw new CoreError("VALIDATION", "\u62A5\u544A\u540D\u79F0\u8FC7\u957F");
+    return withWriteLock(this.root, async () => {
+      const report = await this.getReport(id2);
+      report.title = trimmedTitle;
+      validate("report", report);
+      const content = JSON.stringify(report, null, 2);
+      await atomicWrite(await safePath(this.root, `reports/${id2}/report.json`), content);
+      return report;
+    });
+  }
+  /** 删除整个测试报告目录及其所有证据。 */
+  async deleteReport(id2) {
+    checkId(id2);
+    return withWriteLock(this.root, async () => {
+      const dir = await safePath(this.root, `reports/${id2}`);
+      try {
+        await rm2(dir, { recursive: true, force: true });
+      } catch (error) {
+        if (isFsError(error, "ENOENT")) throw new CoreError("NOT_FOUND", `\u627E\u4E0D\u5230\u62A5\u544A ${id2}`);
+        throw error;
+      }
+    });
+  }
+  /** 修改报告中指定用例的标题。 */
+  async updateReportCaseTitle(reportId, caseId, newTitle) {
+    checkId(reportId);
+    checkId(caseId);
+    const trimmedTitle = newTitle.trim();
+    if (!trimmedTitle) throw new CoreError("VALIDATION", "\u7528\u4F8B\u540D\u79F0\u4E0D\u80FD\u4E3A\u7A7A");
+    return withWriteLock(this.root, async () => {
+      const report = await this.getReport(reportId);
+      const targetCase = report.cases.find((c) => c.id === caseId);
+      if (!targetCase) throw new CoreError("NOT_FOUND", `\u62A5\u544A\u4E2D\u627E\u4E0D\u5230\u7528\u4F8B ${caseId}`);
+      targetCase.title = trimmedTitle;
+      targetCase.definition.name = trimmedTitle;
+      validate("report", report);
+      const content = JSON.stringify(report, null, 2);
+      await atomicWrite(await safePath(this.root, `reports/${reportId}/report.json`), content);
+      return report;
+    });
+  }
+  /** 从报告中删除某条用例并重新计算统计数据。 */
+  async deleteReportCase(reportId, caseId) {
+    checkId(reportId);
+    checkId(caseId);
+    return withWriteLock(this.root, async () => {
+      const report = await this.getReport(reportId);
+      const index = report.cases.findIndex((c) => c.id === caseId);
+      if (index === -1) throw new CoreError("NOT_FOUND", `\u62A5\u544A\u4E2D\u627E\u4E0D\u5230\u7528\u4F8B ${caseId}`);
+      report.cases.splice(index, 1);
+      if (report.cases.length === 0) {
+        await this.deleteReport(reportId);
+        throw new CoreError("NOT_FOUND", "\u62A5\u544A\u4E2D\u7684\u6240\u6709\u7528\u4F8B\u5DF2\u88AB\u6E05\u7A7A\uFF0C\u62A5\u544A\u5DF2\u81EA\u52A8\u79FB\u9664");
+      }
+      const total = report.cases.length;
+      const counts = {
+        passed: report.cases.filter((c) => c.status === "passed").length,
+        failed: report.cases.filter((c) => c.status === "failed").length,
+        blocked: report.cases.filter((c) => c.status === "blocked").length,
+        skipped: report.cases.filter((c) => c.status === "skipped").length
+      };
+      report.totals = {
+        total,
+        ...counts,
+        passRate: Number((counts.passed / total * 100).toFixed(1))
+      };
+      report.status = counts.failed > 0 ? "failed" : counts.blocked > 0 ? "blocked" : counts.passed === total ? "passed" : "skipped";
+      report.summary = `\u5171 ${total} \u6761\u7528\u4F8B\uFF1A${counts.passed} \u6761\u901A\u8FC7\uFF0C${counts.failed} \u6761\u5931\u8D25\uFF0C${counts.blocked} \u6761\u963B\u585E\uFF0C${counts.skipped} \u6761\u8DF3\u8FC7\u3002`;
+      validate("report", report);
+      const content = JSON.stringify(report, null, 2);
+      await atomicWrite(await safePath(this.root, `reports/${reportId}/report.json`), content);
+      return report;
+    });
+  }
+  /** 读取报告关联的截图文件并校验安全性。 */
+  async readReportArtifact(reportId, filename) {
+    checkId(reportId);
+    if (!/^[a-zA-Z0-9_.-]+$/.test(filename)) {
+      throw new CoreError("UNSAFE_PATH", "\u8BC1\u636E\u6587\u4EF6\u540D\u65E0\u6548");
+    }
+    const filePath = await safePath(this.root, `reports/${reportId}/evidence/${filename}`);
+    const bytes = await readBounded(filePath, 20 * 1024 * 1024);
+    const { mime } = inspectScreenshot(bytes);
+    return { mime, bytes };
   }
 };
 
@@ -56568,10 +56956,13 @@ async function createServer(root = process.cwd(), development = false, staticRoo
     if (origin && !allowed.includes(origin))
       return reply.code(403).send({ ok: false, error: { code: "ORIGIN", message: "\u8BF7\u6C42\u6765\u6E90\u4E0D\u88AB\u5141\u8BB8" } });
     const isCaseMutation = ["PATCH", "DELETE"].includes(request.method) && /^\/api\/cases\/[a-z0-9][a-z0-9-]{0,79}$/.test(request.url.split("?")[0]);
-    if (!["GET", "HEAD"].includes(request.method) && !isCaseMutation) {
+    const isReportMutation = ["PATCH", "DELETE"].includes(request.method) && /^\/api\/reports\/[a-z0-9][a-z0-9-]{0,79}(\/cases\/[a-z0-9][a-z0-9-]{0,79})?$/.test(
+      request.url.split("?")[0]
+    );
+    if (!["GET", "HEAD"].includes(request.method) && !isCaseMutation && !isReportMutation) {
       return reply.code(405).send({
         ok: false,
-        error: { code: "READ_ONLY", message: "\u672C\u5730\u9875\u9762\u4EC5\u7528\u4E8E\u67E5\u770B\u6D4B\u8BD5\u8D44\u4EA7\u4E0E\u7BA1\u7406\u7528\u4F8B\u540D\u79F0" }
+        error: { code: "READ_ONLY", message: "\u672C\u5730\u9875\u9762\u4EC5\u7528\u4E8E\u67E5\u770B\u6D4B\u8BD5\u8D44\u4EA7\u4E0E\u7BA1\u7406\u7528\u4F8B\u53CA\u62A5\u544A" }
       });
     }
     reply.header("Cache-Control", "no-store").header("X-Content-Type-Options", "nosniff");
@@ -56624,6 +57015,51 @@ async function createServer(root = process.cwd(), development = false, staticRoo
         request.params.artifactId
       );
       return reply.header("Content-Security-Policy", "default-src 'none'").type(artifact.mime).send(bytes);
+    }
+  );
+  server.get("/api/reports", async () => store2.listReports());
+  server.get(
+    "/api/reports/:id",
+    async (request) => store2.getReport(request.params.id)
+  );
+  server.patch(
+    "/api/reports/:id",
+    async (request) => {
+      const title = request.body?.title;
+      if (typeof title !== "string") {
+        throw new CoreError("VALIDATION", "\u8BF7\u6C42\u4F53\u5FC5\u987B\u5305\u542B title \u5B57\u7B26\u4E32");
+      }
+      return store2.renameReport(request.params.id, title);
+    }
+  );
+  server.delete("/api/reports/:id", async (request) => {
+    await store2.deleteReport(request.params.id);
+    return { ok: true, deleted: request.params.id };
+  });
+  server.patch(
+    "/api/reports/:id/cases/:caseId",
+    async (request) => {
+      const title = request.body?.title;
+      if (typeof title !== "string") {
+        throw new CoreError("VALIDATION", "\u8BF7\u6C42\u4F53\u5FC5\u987B\u5305\u542B title \u5B57\u7B26\u4E32");
+      }
+      return store2.updateReportCaseTitle(request.params.id, request.params.caseId, title);
+    }
+  );
+  server.delete(
+    "/api/reports/:id/cases/:caseId",
+    async (request) => {
+      return store2.deleteReportCase(request.params.id, request.params.caseId);
+    }
+  );
+  server.get(
+    "/api/reports/:id/evidence/:filename",
+    async (request, reply) => {
+      const { mime, bytes } = await store2.readReportArtifact(
+        request.params.id,
+        request.params.filename
+      );
+      return reply.header("Content-Security-Policy", "default-src 'none'").type(mime).send(bytes);
     }
   );
   const candidates = [
@@ -56845,7 +57281,19 @@ cli.command("validate").description("\u6821\u9A8C\u5DE5\u4F5C\u533A\u7684\u5168\
   if (result.errors.length) process.exitCode = 1;
 });
 var tests = cli.command("test").description("\u4F4E\u6210\u672C\u63D0\u4EA4 Agent \u5DF2\u5B8C\u6210\u7684\u6D4B\u8BD5");
-tests.command("submit").description("\u4E00\u6B21\u6821\u9A8C\u5E76\u4FDD\u5B58\u65B0\u7528\u4F8B\u3001\u6267\u884C\u7ED3\u679C\u548C\u622A\u56FE\u8BC1\u636E").requiredOption("--input <path>", "JSON \u6587\u4EF6\uFF0C- \u8868\u793A stdin").action(async (options) => output(await (await store()).submitTest(await readInput(options))));
+tests.command("submit").description("\u4E00\u6B21\u6821\u9A8C\u5E76\u4FDD\u5B58\u6D4B\u8BD5\u7528\u4F8B\u6216\u6279\u6B21\u6D4B\u8BD5\u62A5\u544A\u53CA\u622A\u56FE\u8BC1\u636E").requiredOption("--input <path>", "JSON \u6587\u4EF6\uFF0C- \u8868\u793A stdin").action(async (options) => {
+  const data = await readInput(options);
+  const repository = await store();
+  if (data && typeof data === "object" && Array.isArray(data.cases)) {
+    output(await repository.submitReport(data));
+  } else {
+    output(await repository.submitTest(data));
+  }
+});
+var reports = cli.command("report").description("\u63D0\u4EA4\u548C\u67E5\u770B\u591A\u7528\u4F8B\u6279\u6B21\u6D4B\u8BD5\u62A5\u544A");
+reports.command("submit").description("\u4E00\u6B21\u6821\u9A8C\u5E76\u4FDD\u5B58\u5305\u542B\u591A\u6761\u7528\u4F8B\u7684\u6D4B\u8BD5\u62A5\u544A\u53CA\u622A\u56FE\u8BC1\u636E").requiredOption("--input <path>", "JSON \u6587\u4EF6\uFF0C- \u8868\u793A stdin").action(async (options) => output(await (await store()).submitReport(await readInput(options))));
+reports.command("list").option("--json").action(async () => output(await (await store()).listReports()));
+reports.command("get <id>").option("--json").action(async (id2) => output(await (await store()).getReport(id2)));
 var cases = cli.command("case").description("\u8BFB\u53D6\u548C\u7EF4\u62A4\u6D4B\u8BD5\u7528\u4F8B");
 cases.command("create").description("\u521B\u5EFA\u5177\u6709\u81EA\u52A8\u552F\u4E00 ID \u7684\u5168\u65B0\u7528\u4F8B").requiredOption("--input <path>", "JSON \u6587\u4EF6\uFF0C- \u8868\u793A stdin").action(async (options) => output(await (await store()).createCase(await readInput(options))));
 cases.command("list").option("--json").action(async () => output(await (await store()).listCases()));

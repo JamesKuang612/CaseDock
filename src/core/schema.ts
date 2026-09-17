@@ -8,6 +8,8 @@ import type {
   Run,
   SaveCaseInput,
   StartRunInput,
+  Report,
+  SubmitReportInput,
   SubmitTestInput,
   TestCase,
   WorkspaceConfig,
@@ -229,6 +231,133 @@ export const schemas = {
     },
     ['environment', 'initialUrl', 'targetUrl', 'credentials', 'tokenUsage'],
   ),
+  report: object(
+    {
+      schemaVersion: { const: 2 },
+      runId: id,
+      title: text,
+      status: { type: 'string', enum: ['passed', 'failed', 'blocked', 'skipped'] },
+      startedAt: text,
+      finishedAt: text,
+      durationMs: { type: 'number', minimum: 0 },
+      summary: { type: 'string' },
+      input: object(
+        {
+          sourceName: text,
+          file: { type: 'string' },
+          type: text,
+        },
+        ['file'],
+      ),
+      totals: object({
+        total: { type: 'integer', minimum: 0 },
+        passed: { type: 'integer', minimum: 0 },
+        failed: { type: 'integer', minimum: 0 },
+        blocked: { type: 'integer', minimum: 0 },
+        skipped: { type: 'integer', minimum: 0 },
+        passRate: { type: 'number', minimum: 0, maximum: 100 },
+      }),
+      cases: array(
+        object(
+          {
+            id: text,
+            title: text,
+            category: { type: 'string' },
+            testData: { type: 'string' },
+            definition: object(
+              {
+                name: text,
+                category: { type: 'string' },
+                testData: { type: 'string' },
+                steps: array({ type: 'string' }),
+                assertions: array({ type: 'string' }),
+              },
+              ['name', 'category', 'testData', 'steps', 'assertions'],
+            ),
+            status: { type: 'string', enum: ['passed', 'failed', 'blocked', 'skipped'] },
+            summary: { type: 'string' },
+            startedAt: text,
+            durationMs: { type: 'number', minimum: 0 },
+            steps: array(
+              object(
+                {
+                  index: { type: 'integer', minimum: 1 },
+                  action: text,
+                  expected: { type: 'string' },
+                  actual: text,
+                  status: { type: 'string', enum: ['passed', 'failed', 'blocked', 'skipped'] },
+                  screenshot: {
+                    type: 'string',
+                    pattern: '^evidence/[^/]+\\.(png|jpg|jpeg|webp)$',
+                  },
+                },
+                ['expected', 'screenshot'],
+              ),
+              1,
+            ),
+          },
+          ['category', 'testData', 'startedAt', 'durationMs'],
+        ),
+        1,
+      ),
+    },
+    ['finishedAt', 'durationMs'],
+  ),
+  submitReport: object(
+    {
+      schemaVersion: { const: 2 },
+      title: text,
+      input: object(
+        {
+          sourceName: text,
+          file: { type: 'string' },
+          type: text,
+        },
+        ['sourceName', 'file', 'type'],
+      ),
+      cases: array(
+        object(
+          {
+            id: text,
+            title: text,
+            category: { type: 'string' },
+            testData: { type: 'string' },
+            definition: object(
+              {
+                name: text,
+                category: { type: 'string' },
+                testData: { type: 'string' },
+                steps: array({ type: 'string' }),
+                assertions: array({ type: 'string' }),
+              },
+              ['name', 'category', 'testData', 'steps', 'assertions'],
+            ),
+            status: { type: 'string', enum: ['passed', 'failed', 'blocked', 'skipped'] },
+            summary: { type: 'string' },
+            startedAt: text,
+            durationMs: { type: 'number', minimum: 0 },
+            steps: array(
+              object(
+                {
+                  index: { type: 'integer', minimum: 1 },
+                  action: text,
+                  expected: { type: 'string' },
+                  actual: text,
+                  status: { type: 'string', enum: ['passed', 'failed', 'blocked', 'skipped'] },
+                  evidence: { type: 'string' },
+                },
+                ['expected', 'evidence'],
+              ),
+              1,
+            ),
+          },
+          ['id', 'category', 'testData', 'definition', 'startedAt', 'durationMs'],
+        ),
+        1,
+      ),
+    },
+    ['schemaVersion', 'input'],
+  ),
 };
 interface Inputs {
   workspace: WorkspaceConfig;
@@ -241,6 +370,8 @@ interface Inputs {
   finishRun: FinishInput;
   submitTest: SubmitTestInput;
   run: Run;
+  report: Report;
+  submitReport: SubmitReportInput;
 }
 const ajv = new Ajv({ allErrors: true });
 const validators = new Map<string, ValidateFunction>();

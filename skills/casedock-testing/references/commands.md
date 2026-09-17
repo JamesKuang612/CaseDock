@@ -8,7 +8,64 @@ RUNNER=node "<skill-root>/scripts/casedock.mjs"
 
 下文的 `<RUNNER>` 均表示这条命令。不要依赖全局 `casedock`，也不要运行 `npm install`。所有命令可用 `--root <资产目录>` 显式指定资产库。
 
-## 新测试：一次提交
+## 批次测试报告：一次提交多条用例（推荐）
+
+当输入为 Excel 表格或包含多条测试场景时，将所有截图暂存到资产库 `.casedock/inbox/`，整理为一份包含全部用例的报告清单，执行：
+
+```text
+<RUNNER> --root <资产目录> report submit --input <清单路径>
+```
+
+示例清单结构（支持 1 至数十条用例）：
+
+```json
+{
+  "schemaVersion": 2,
+  "title": "简道云插件批量测试",
+  "input": {
+    "sourceName": "插件用例.xlsx",
+    "type": "xlsx"
+  },
+  "cases": [
+    {
+      "id": "case-1",
+      "title": "插件运行时的出口IP校验",
+      "category": "开放平台 / 插件运行环境",
+      "testData": "目标URL: https://...\n测试账号: admin\n测试密码: 123456",
+      "definition": {
+        "name": "插件运行时的出口IP校验",
+        "category": "开放平台 / 插件运行环境",
+        "testData": "目标URL: https://...\n测试账号: admin\n测试密码: 123456",
+        "steps": ["打开环境配置", "发起网络请求并校验出口IP"],
+        "assertions": ["显示配置项", "返回IP与白名单一致"]
+      },
+      "status": "passed",
+      "summary": "IP 校验成功，返回 47.97.99.12 与白名单一致",
+      "steps": [
+        {
+          "index": 1,
+          "action": "打开环境配置",
+          "expected": "显示配置项",
+          "actual": "配置项已成功展示",
+          "status": "passed"
+        },
+        {
+          "index": 2,
+          "action": "发起网络请求并校验出口IP",
+          "expected": "返回IP与白名单一致",
+          "actual": "返回IP为 47.97.99.12",
+          "status": "passed",
+          "evidence": ".casedock/inbox/shot1.png"
+        }
+      ]
+    }
+  ]
+}
+```
+
+CaseDock 会自动归档截图并计算总数、通过数、失败数、阻塞数、通过率及生成全局摘要。
+
+## 单用例测试提交（兼容旧协议）
 
 将截图保存到资产库 `.casedock/inbox/`，把单个场景整理成 JSON 清单，然后执行：
 

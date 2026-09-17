@@ -180,3 +180,123 @@ export type RunSummary = Pick<
   | 'tokenUsage'
   | 'executor'
 >;
+
+/** 批次测试报告状态 */
+export type ReportStatus = 'passed' | 'failed' | 'blocked' | 'skipped';
+
+/** 批次测试报告综合统计指标 */
+export interface ReportTotals {
+  total: number;
+  passed: number;
+  failed: number;
+  blocked: number;
+  skipped: number;
+  passRate: number;
+}
+
+/** 报告中用例的原始定义与前置数据 */
+export interface ReportCaseDefinition {
+  name: string;
+  category: string;
+  testData: string;
+  steps: string[];
+  assertions: string[];
+}
+
+/** 报告中用例的单步执行记录 */
+export interface ReportStep {
+  index: number;
+  action: string;
+  expected: string;
+  actual: string;
+  status: ReportStatus;
+  screenshot?: string;
+}
+
+/** 报告中包含的独立测试用例及执行结果 */
+export interface ReportCase {
+  id: string;
+  title: string;
+  category: string;
+  testData: string;
+  definition: ReportCaseDefinition;
+  status: ReportStatus;
+  summary: string;
+  startedAt?: string;
+  durationMs?: number;
+  steps: ReportStep[];
+}
+
+/** 报告输入来源描述 */
+export interface ReportInputSource {
+  sourceName: string;
+  file: string;
+  type: string;
+}
+
+/** 完整的批次测试报告实体对象 */
+export interface Report {
+  schemaVersion: 2;
+  runId: string;
+  title: string;
+  status: ReportStatus;
+  startedAt: string;
+  finishedAt?: string;
+  durationMs?: number;
+  summary: string;
+  input: ReportInputSource;
+  totals: ReportTotals;
+  cases: ReportCase[];
+}
+
+/** 报告列表呈现的摘要信息 */
+export type ReportSummary = Pick<
+  Report,
+  'runId' | 'title' | 'status' | 'startedAt' | 'summary' | 'totals' | 'input'
+>;
+
+/** 提交批次测试报告的入参清单格式 */
+export interface SubmitReportInput {
+  schemaVersion?: 2;
+  title: string;
+  input?: {
+    sourceName?: string;
+    file?: string;
+    type?: string;
+  };
+  cases: {
+    id?: string;
+    title: string;
+    category?: string;
+    testData?: string;
+    definition?: {
+      name?: string;
+      category?: string;
+      testData?: string;
+      steps?: string[];
+      assertions?: string[];
+    };
+    status: ReportStatus;
+    summary: string;
+    startedAt?: string;
+    durationMs?: number;
+    steps: {
+      index: number;
+      action: string;
+      expected: string;
+      actual: string;
+      status: ReportStatus;
+      evidence?: string;
+    }[];
+  }[];
+}
+
+/** 提交测试报告的成功返回信息 */
+export interface SubmitReportResult {
+  runId: string;
+  title: string;
+  status: ReportStatus;
+  reportPath: string;
+  evidenceDirectory: string;
+  totals: ReportTotals;
+}

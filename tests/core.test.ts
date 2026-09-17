@@ -674,3 +674,186 @@ test('HTTP API 允许修改用例名称与删除用例，拒绝未授权的外�
   const listRes = await server.inject('/api/cases');
   assert.equal(listRes.json().cases.length, 0);
 });
+
+test('submitReport 一次性提交包含多条用例的测试报告并自动计算 totals 与归档截图', async (t) => {
+  const { root, store } = await fixture(t);
+  const inbox = join(root, '.casedock/inbox');
+  await writeFile(join(inbox, 'shot1.png'), png);
+  await writeFile(join(inbox, 'shot2.png'), png);
+
+  const res = await store.submitReport({
+    schemaVersion: 2,
+    title: '简道云插件批量测试',
+    input: {
+      sourceName: '插件用例.xlsx',
+      type: 'xlsx',
+    },
+    cases: [
+      {
+        id: 'case-1',
+        title: '插件运行时的出口IP校验',
+        category: '开放平台 / 插件运行环境',
+        status: 'passed',
+        summary: 'IP 校验成功',
+        steps: [
+          {
+            index: 1,
+            action: '进入环境配置',
+            expected: '显示配置项',
+            actual: '配置项已显示',
+            status: 'passed',
+          },
+          {
+            index: 2,
+            action: '发起网络请求并校验出口IP',
+            expected: 'IP 与白名单一致',
+            actual: 'IP 返回 47.97.99.12',
+            status: 'passed',
+            evidence: '.casedock/inbox/shot1.png',
+          },
+        ],
+      },
+      {
+        id: 'case-2',
+        title: '插件管理自建插件区域展示（空态）',
+        category: '开放平台 / 插件管理',
+        status: 'failed',
+        summary: '空态提示文案不正确',
+        steps: [
+          {
+            index: 1,
+            action: '打开自建插件列表',
+            expected: '显示“暂无插件”引导',
+            actual: '页面白屏未加载',
+            status: 'failed',
+            evidence: '.casedock/inbox/shot2.png',
+          },
+        ],
+      },
+      {
+        id: 'case-3',
+        title: '扫码授权验证',
+        category: '用户中心 / 认证',
+        status: 'blocked',
+        summary: '等待用户手机扫码',
+        steps: [
+          {
+            index: 1,
+            action: '弹出二维码',
+            expected: '出现登录二维码',
+            actual: '二维码已弹出，等待扫描',
+            status: 'blocked',
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.ok(res.runId.startsWith('report-'));
+  assert.equal(res.status, 'failed'); // 存在失败用例，整份报告状态为 failed
+  assert.equal(res.totals.total, 3);
+  assert.equal(res.totals.passed, 1);
+  assert.equal(res.totals.failed, 1);
+  assert.equal(res.totals.blocked, 1);
+  assert.equal(res.totals.skipped, 0);
+  assert.equal(res.totals.passRate, 33.3);
+
+  // 验证 getReport
+  const report = await store.getReport(res.runId);
+  assert.equal(report.title, '简道云插件批量测试');
+  assert.equal(report.cases.length, 3);
+  assert.ok(report.cases[0].steps[1].screenshot?.startsWith('evidence/'));
+
+  // 验证 listReports
+  const list = await store.listReports();
+  assert.equal(list.reports.length, 1);
+  assert.equal(list.reports[0].runId, res.runId);
+
+  // 验证证据读取
+  const shotName = report.cases[0].steps[1].screenshot!.replace('evidence/', '');
+  const artifact = await store.readReportArtifact(res.runId, shotName);
+  assert.equal(artifact.mime, 'image/png');
+  assert.ok(artifact.bytes.length > 0);
+
+  // 验证重命名报告
+  const renamed = await store.renameReport(res.runId, '更新后的报告名称');
+  assert.equal(renamed.title, '更新后的报告名称');
+
+  // 验证修改用例名称
+  const caseRenamed = await store.updateReportCaseTitle(res.runId, 'case-1', '新的用例名称');
+  assert.equal(caseRenamed.cases[0].title, '新的用例名称');
+
+  // 验证删除单条用例并重新计算指标
+  const afterDeleteCase = await store.deleteReportCase(res.runId, 'case-2');
+  assert.equal(afterDeleteCase.cases.length, 2);
+  assert.equal(afterDeleteCase.totals.failed, 0);
+  assert.equal(afterDeleteCase.totals.total, 2);
+  assert.equal(afterDeleteCase.totals.passRate, 50);
+
+  // 验证删除整个报告
+  await store.deleteReport(res.runId);
+  await assert.rejects(store.getReport(res.runId), code('NOT_FOUND'));
+});
+
+test('HTTP API 允许查看报告列表、详情、重命名报告与用例及删除报告', async (t) => {
+  const { root, store } = await fixture(t);
+  const inbox = join(root, '.casedock/inbox');
+  await writeFile(join(inbox, 'shot.png'), png);
+
+  const res = await store.submitReport({
+    title: 'API 测试报告',
+    cases: [
+      {
+        title: '步骤1',
+        status: 'passed',
+        summary: '通过',
+        steps: [
+          {
+            index: 1,
+            action: '执行',
+            expected: '成功',
+            actual: '成功',
+            status: 'passed',
+            evidence: '.casedock/inbox/shot.png',
+          },
+        ],
+      },
+    ],
+  });
+
+  const server = await createServer(root);
+  t.after(() => server.close());
+
+  // GET /api/reports
+  const listRes = await server.inject('/api/reports');
+  assert.equal(listRes.statusCode, 200);
+  assert.equal(listRes.json().reports.length, 1);
+
+  // GET /api/reports/:id
+  const getRes = await server.inject(`/api/reports/${res.runId}`);
+  assert.equal(getRes.statusCode, 200);
+  assert.equal(getRes.json().title, 'API 测试报告');
+
+  // PATCH /api/reports/:id
+  const patchRes = await server.inject({
+    method: 'PATCH',
+    url: `/api/reports/${res.runId}`,
+    payload: { title: '通过 API 重命名的报告' },
+  });
+  assert.equal(patchRes.statusCode, 200);
+  assert.equal(patchRes.json().title, '通过 API 重命名的报告');
+
+  // GET /api/reports/:id/evidence/:filename
+  const shotFile = getRes.json().cases[0].steps[0].screenshot.replace('evidence/', '');
+  const shotRes = await server.inject(`/api/reports/${res.runId}/evidence/${shotFile}`);
+  assert.equal(shotRes.statusCode, 200);
+  assert.equal(shotRes.headers['content-type'], 'image/png');
+
+  // DELETE /api/reports/:id
+  const delRes = await server.inject({
+    method: 'DELETE',
+    url: `/api/reports/${res.runId}`,
+  });
+  assert.equal(delRes.statusCode, 200);
+  assert.equal(delRes.json().ok, true);
+});

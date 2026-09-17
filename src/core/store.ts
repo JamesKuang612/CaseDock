@@ -6,8 +6,16 @@ import { parseDocument, stringify } from 'yaml';
 import type {
   Artifact,
   CaseDocument,
+  Report,
+  ReportCase,
+  ReportCaseDefinition,
+  ReportInputSource,
+  ReportStatus,
+  ReportStep,
+  ReportSummary,
   Run,
   RunSummary,
+  SubmitReportResult,
   SubmitTestResult,
   TestCase,
   WorkspaceConfig,
@@ -738,6 +746,7 @@ export class Store {
       }
       await mkdir(await safePath(this.root, 'cases'), { recursive: true });
       await mkdir(await safePath(this.root, 'runs'), { recursive: true });
+      await mkdir(await safePath(this.root, 'reports'), { recursive: true });
       await mkdir(await safePath(this.root, '.casedock/inbox'), { recursive: true });
       const ignore = await safePath(this.root, '.gitignore');
       const current = (await optionalText(ignore)) ?? '';
@@ -747,8 +756,315 @@ export class Store {
         ...(await this.getWorkspace()),
         casesDirectory: 'cases',
         runsDirectory: 'runs',
+        reportsDirectory: 'reports',
         inbox: '.casedock/inbox',
       };
     });
+  }
+
+  /** 一次性提交包含多条用例的批次测试报告，校验截图后原子发布。 */
+  async submitReport(input: unknown): Promise<SubmitReportResult> {
+    const value = validate('submitReport', input);
+    const startedAt = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const stamp = `${startedAt.getFullYear()}${pad(startedAt.getMonth() + 1)}${pad(startedAt.getDate())}-${pad(startedAt.getHours())}${pad(startedAt.getMinutes())}${pad(startedAt.getSeconds())}`;
+    const runId = `report-${stamp}-${randomUUID().slice(0, 8)}`;
+    checkId(runId);
+
+    return withWriteLock(this.root, async () => {
+      const artifactFiles = new Map<string, Buffer>();
+      const sourceCache = new Map<
+        string,
+        { bytes: Buffer; extension: 'png' | 'jpg'; mime: string }
+      >();
+
+      const processedCases: ReportCase[] = [];
+
+      for (let caseIndex = 0; caseIndex < value.cases.length; caseIndex++) {
+        const rawCase = value.cases[caseIndex]!;
+        const caseId = rawCase.id || `case-${caseIndex + 1}`;
+        checkId(caseId);
+
+        const steps: ReportStep[] = [];
+        for (const rawStep of rawCase.steps) {
+          let screenshotPath: string | undefined;
+          if (rawStep.evidence) {
+            let inspected = sourceCache.get(rawStep.evidence);
+            if (!inspected) {
+              const bytes = await readBounded(
+                await safePath(this.root, rawStep.evidence),
+                20 * 1024 * 1024,
+              );
+              if (!bytes.length) throw new CoreError('VALIDATION', '不能登记空证据');
+              const format = inspectScreenshot(bytes);
+              inspected = { bytes, ...format };
+              sourceCache.set(rawStep.evidence, inspected);
+            }
+            const filename = `case-${caseIndex + 1}-step-${rawStep.index}-${randomUUID().slice(0, 6)}.${inspected.extension}`;
+            screenshotPath = `evidence/${filename}`;
+            artifactFiles.set(screenshotPath, inspected.bytes);
+          }
+
+          steps.push({
+            index: rawStep.index,
+            action: rawStep.action,
+            expected: rawStep.expected || '',
+            actual: rawStep.actual,
+            status: rawStep.status,
+            ...(screenshotPath ? { screenshot: screenshotPath } : {}),
+          });
+        }
+
+        const caseDefinition: ReportCaseDefinition = {
+          name: rawCase.definition?.name || rawCase.title,
+          category: rawCase.definition?.category || rawCase.category || '未分类',
+          testData: rawCase.definition?.testData || rawCase.testData || '',
+          steps: rawCase.definition?.steps || steps.map((s) => s.action),
+          assertions:
+            rawCase.definition?.assertions ||
+            steps.map((s) => s.expected).filter((e) => Boolean(e)),
+        };
+
+        const caseStartedAt = rawCase.startedAt || startedAt.toISOString();
+        const caseDurationMs =
+          rawCase.durationMs !== undefined
+            ? rawCase.durationMs
+            : Math.max(0, Date.now() - new Date(caseStartedAt).getTime());
+
+        processedCases.push({
+          id: caseId,
+          title: rawCase.title,
+          category: rawCase.category || '未分类',
+          testData: rawCase.testData || '',
+          definition: caseDefinition,
+          status: rawCase.status,
+          summary: rawCase.summary,
+          startedAt: caseStartedAt,
+          durationMs: caseDurationMs,
+          steps,
+        });
+      }
+
+      const total = processedCases.length;
+      const counts = {
+        passed: processedCases.filter((c) => c.status === 'passed').length,
+        failed: processedCases.filter((c) => c.status === 'failed').length,
+        blocked: processedCases.filter((c) => c.status === 'blocked').length,
+        skipped: processedCases.filter((c) => c.status === 'skipped').length,
+      };
+      const passRate = total > 0 ? Number(((counts.passed / total) * 100).toFixed(1)) : 0;
+      const reportStatus: ReportStatus =
+        counts.failed > 0
+          ? 'failed'
+          : counts.blocked > 0
+            ? 'blocked'
+            : counts.passed === total
+              ? 'passed'
+              : 'skipped';
+
+      const summaryText = `共 ${total} 条用例：${counts.passed} 条通过，${counts.failed} 条失败，${counts.blocked} 条阻塞，${counts.skipped} 条跳过。`;
+
+      const inputSource: ReportInputSource = {
+        sourceName: value.input?.sourceName || value.title,
+        file: value.input?.file || '',
+        type: value.input?.type || 'batch',
+      };
+
+      const report: Report = {
+        schemaVersion: 2,
+        runId,
+        title: value.title,
+        status: reportStatus,
+        startedAt: startedAt.toISOString(),
+        finishedAt: new Date().toISOString(),
+        durationMs: Math.max(0, Date.now() - startedAt.getTime()),
+        summary: summaryText,
+        input: inputSource,
+        totals: {
+          total,
+          ...counts,
+          passRate,
+        },
+        cases: processedCases,
+      };
+
+      validate('report', report);
+      const reportContent = JSON.stringify(report, null, 2);
+      if (Buffer.byteLength(reportContent) > 10 * 1024 * 1024)
+        throw new CoreError('FILE_SIZE', '测试报告总大小超过 10 MiB，请缩减步骤或拆分批次');
+
+      const transaction = `.casedock/staging/${runId}`;
+      const stagedReport = await safePath(this.root, `${transaction}/report.json`);
+      const finalDir = await safePath(this.root, `reports/${runId}`);
+
+      try {
+        await mkdir(await safePath(this.root, `${transaction}/evidence`), { recursive: true });
+        await atomicWrite(stagedReport, reportContent);
+        for (const [relPath, bytes] of artifactFiles) {
+          await atomicWrite(await safePath(this.root, `${transaction}/${relPath}`), bytes);
+        }
+        await mkdir(await safePath(this.root, 'reports'), { recursive: true });
+        await rename(await safePath(this.root, transaction), finalDir);
+      } catch (error) {
+        await rm(await safePath(this.root, transaction), { recursive: true, force: true });
+        throw error;
+      }
+
+      return {
+        runId,
+        title: report.title,
+        status: report.status,
+        reportPath: `reports/${runId}/report.json`,
+        evidenceDirectory: `reports/${runId}/evidence`,
+        totals: report.totals,
+      };
+    });
+  }
+
+  /** 读取并校验指定的测试报告。 */
+  async getReport(id: string): Promise<Report> {
+    checkId(id);
+    const path = `reports/${id}/report.json`;
+    let bytes: Buffer;
+    try {
+      bytes = await readBounded(await safePath(this.root, path), 10 * 1024 * 1024);
+    } catch (error) {
+      if (isFsError(error, 'ENOENT')) throw new CoreError('NOT_FOUND', `找不到报告 ${id}`);
+      throw error;
+    }
+    const raw = JSON.parse(bytes.toString('utf8'));
+    const report = validate('report', raw);
+    if (report.runId !== id) throw new CoreError('VALIDATION', '报告 ID 必须与目录名一致');
+    return report;
+  }
+
+  /** 列出所有测试报告摘要，按开始时间倒序排列。 */
+  async listReports() {
+    const reports: ReportSummary[] = [];
+    const errors: { path: string; message: string }[] = [];
+    const names = (await this.names('reports', '')).filter(isId);
+    for (const name of names) {
+      try {
+        const report = await this.getReport(name);
+        reports.push({
+          runId: report.runId,
+          title: report.title,
+          status: report.status,
+          startedAt: report.startedAt,
+          summary: report.summary,
+          totals: report.totals,
+          input: report.input,
+        });
+      } catch (error) {
+        errors.push({
+          path: `reports/${name}`,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return { reports: reports.sort((a, b) => b.startedAt.localeCompare(a.startedAt)), errors };
+  }
+
+  /** 修改报告标题。 */
+  async renameReport(id: string, title: string): Promise<Report> {
+    checkId(id);
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) throw new CoreError('VALIDATION', '报告名称不能为空');
+    if (trimmedTitle.length > 200) throw new CoreError('VALIDATION', '报告名称过长');
+    return withWriteLock(this.root, async () => {
+      const report = await this.getReport(id);
+      report.title = trimmedTitle;
+      validate('report', report);
+      const content = JSON.stringify(report, null, 2);
+      await atomicWrite(await safePath(this.root, `reports/${id}/report.json`), content);
+      return report;
+    });
+  }
+
+  /** 删除整个测试报告目录及其所有证据。 */
+  async deleteReport(id: string): Promise<void> {
+    checkId(id);
+    return withWriteLock(this.root, async () => {
+      const dir = await safePath(this.root, `reports/${id}`);
+      try {
+        await rm(dir, { recursive: true, force: true });
+      } catch (error) {
+        if (isFsError(error, 'ENOENT')) throw new CoreError('NOT_FOUND', `找不到报告 ${id}`);
+        throw error;
+      }
+    });
+  }
+
+  /** 修改报告中指定用例的标题。 */
+  async updateReportCaseTitle(reportId: string, caseId: string, newTitle: string): Promise<Report> {
+    checkId(reportId);
+    checkId(caseId);
+    const trimmedTitle = newTitle.trim();
+    if (!trimmedTitle) throw new CoreError('VALIDATION', '用例名称不能为空');
+    return withWriteLock(this.root, async () => {
+      const report = await this.getReport(reportId);
+      const targetCase = report.cases.find((c) => c.id === caseId);
+      if (!targetCase) throw new CoreError('NOT_FOUND', `报告中找不到用例 ${caseId}`);
+      targetCase.title = trimmedTitle;
+      targetCase.definition.name = trimmedTitle;
+      validate('report', report);
+      const content = JSON.stringify(report, null, 2);
+      await atomicWrite(await safePath(this.root, `reports/${reportId}/report.json`), content);
+      return report;
+    });
+  }
+
+  /** 从报告中删除某条用例并重新计算统计数据。 */
+  async deleteReportCase(reportId: string, caseId: string): Promise<Report> {
+    checkId(reportId);
+    checkId(caseId);
+    return withWriteLock(this.root, async () => {
+      const report = await this.getReport(reportId);
+      const index = report.cases.findIndex((c) => c.id === caseId);
+      if (index === -1) throw new CoreError('NOT_FOUND', `报告中找不到用例 ${caseId}`);
+      report.cases.splice(index, 1);
+      if (report.cases.length === 0) {
+        await this.deleteReport(reportId);
+        throw new CoreError('NOT_FOUND', '报告中的所有用例已被清空，报告已自动移除');
+      }
+      const total = report.cases.length;
+      const counts = {
+        passed: report.cases.filter((c) => c.status === 'passed').length,
+        failed: report.cases.filter((c) => c.status === 'failed').length,
+        blocked: report.cases.filter((c) => c.status === 'blocked').length,
+        skipped: report.cases.filter((c) => c.status === 'skipped').length,
+      };
+      report.totals = {
+        total,
+        ...counts,
+        passRate: Number(((counts.passed / total) * 100).toFixed(1)),
+      };
+      report.status =
+        counts.failed > 0
+          ? 'failed'
+          : counts.blocked > 0
+            ? 'blocked'
+            : counts.passed === total
+              ? 'passed'
+              : 'skipped';
+      report.summary = `共 ${total} 条用例：${counts.passed} 条通过，${counts.failed} 条失败，${counts.blocked} 条阻塞，${counts.skipped} 条跳过。`;
+
+      validate('report', report);
+      const content = JSON.stringify(report, null, 2);
+      await atomicWrite(await safePath(this.root, `reports/${reportId}/report.json`), content);
+      return report;
+    });
+  }
+
+  /** 读取报告关联的截图文件并校验安全性。 */
+  async readReportArtifact(reportId: string, filename: string) {
+    checkId(reportId);
+    if (!/^[a-zA-Z0-9_.-]+$/.test(filename)) {
+      throw new CoreError('UNSAFE_PATH', '证据文件名无效');
+    }
+    const filePath = await safePath(this.root, `reports/${reportId}/evidence/${filename}`);
+    const bytes = await readBounded(filePath, 20 * 1024 * 1024);
+    const { mime } = inspectScreenshot(bytes);
+    return { mime, bytes };
   }
 }

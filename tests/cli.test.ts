@@ -203,3 +203,75 @@ test('CLI 通过 stdin 串联创建、执行记录、截图证据和结束，失
   assert.equal(invalid.status, 1);
   assert.equal(JSON.parse(invalid.stderr).error.code, 'VALIDATION');
 });
+
+test('CLI 支持通过 report submit 提交多用例批次报告，并可通过 report list/get 查看', async (t) => {
+  const base = resolve('.casedock/cli-tests');
+  await mkdir(base, { recursive: true });
+  const root = await mkdtemp(join(base, 'report-'));
+  t.after(async () => {
+    assert.ok(relative(base, root).startsWith('report-'));
+    await rm(root, { recursive: true, force: true });
+  });
+
+  function call(args: string[], input?: unknown) {
+    const result = spawnSync(
+      process.execPath,
+      [
+        '--import',
+        'tsx',
+        'src/cli.ts',
+        '--root',
+        root,
+        ...args,
+        ...(input === undefined ? [] : ['--input', '-']),
+      ],
+      {
+        cwd: process.cwd(),
+        windowsHide: true,
+        encoding: 'utf8',
+        input: input === undefined ? undefined : JSON.stringify(input),
+      },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const envelope = JSON.parse(result.stdout);
+    assert.equal(envelope.apiVersion, 1);
+    assert.equal(envelope.ok, true);
+    return envelope.data;
+  }
+
+  call(['init']);
+  await writeFile(join(root, '.casedock/inbox/shot.png'), png);
+
+  const reportResult = call(['report', 'submit'], {
+    title: 'CLI 批量测试报告',
+    cases: [
+      {
+        title: '用例A',
+        status: 'passed',
+        summary: '用例A通过',
+        steps: [
+          {
+            index: 1,
+            action: '点击',
+            expected: '成功',
+            actual: '成功',
+            status: 'passed',
+            evidence: '.casedock/inbox/shot.png',
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.ok(reportResult.runId.startsWith('report-'));
+  assert.equal(reportResult.totals.total, 1);
+  assert.equal(reportResult.totals.passed, 1);
+
+  const list = call(['report', 'list', '--json']);
+  assert.equal(list.reports.length, 1);
+  assert.equal(list.reports[0].runId, reportResult.runId);
+
+  const detail = call(['report', 'get', reportResult.runId, '--json']);
+  assert.equal(detail.title, 'CLI 批量测试报告');
+  assert.equal(detail.cases.length, 1);
+});

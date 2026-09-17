@@ -183,9 +183,35 @@ cli
 const tests = cli.command('test').description('低成本提交 Agent 已完成的测试');
 tests
   .command('submit')
-  .description('一次校验并保存新用例、执行结果和截图证据')
+  .description('一次校验并保存测试用例或批次测试报告及截图证据')
   .requiredOption('--input <path>', 'JSON 文件，- 表示 stdin')
-  .action(async (options) => output(await (await store()).submitTest(await readInput(options))));
+  .action(async (options) => {
+    const data = await readInput(options);
+    const repository = await store();
+    if (
+      data &&
+      typeof data === 'object' &&
+      Array.isArray((data as Record<string, unknown>).cases)
+    ) {
+      output(await repository.submitReport(data));
+    } else {
+      output(await repository.submitTest(data));
+    }
+  });
+const reports = cli.command('report').description('提交和查看多用例批次测试报告');
+reports
+  .command('submit')
+  .description('一次校验并保存包含多条用例的测试报告及截图证据')
+  .requiredOption('--input <path>', 'JSON 文件，- 表示 stdin')
+  .action(async (options) => output(await (await store()).submitReport(await readInput(options))));
+reports
+  .command('list')
+  .option('--json')
+  .action(async () => output(await (await store()).listReports()));
+reports
+  .command('get <id>')
+  .option('--json')
+  .action(async (id: string) => output(await (await store()).getReport(id)));
 const cases = cli.command('case').description('读取和维护测试用例');
 cases
   .command('create')

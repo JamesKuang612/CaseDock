@@ -26,10 +26,15 @@ export async function createServer(root = process.cwd(), development = false, st
     const isCaseMutation =
       ['PATCH', 'DELETE'].includes(request.method) &&
       /^\/api\/cases\/[a-z0-9][a-z0-9-]{0,79}$/.test(request.url.split('?')[0]);
-    if (!['GET', 'HEAD'].includes(request.method) && !isCaseMutation) {
+    const isReportMutation =
+      ['PATCH', 'DELETE'].includes(request.method) &&
+      /^\/api\/reports\/[a-z0-9][a-z0-9-]{0,79}(\/cases\/[a-z0-9][a-z0-9-]{0,79})?$/.test(
+        request.url.split('?')[0],
+      );
+    if (!['GET', 'HEAD'].includes(request.method) && !isCaseMutation && !isReportMutation) {
       return reply.code(405).send({
         ok: false,
-        error: { code: 'READ_ONLY', message: '本地页面仅用于查看测试资产与管理用例名称' },
+        error: { code: 'READ_ONLY', message: '本地页面仅用于查看测试资产与管理用例及报告' },
       });
     }
     reply.header('Cache-Control', 'no-store').header('X-Content-Type-Options', 'nosniff');
@@ -89,6 +94,50 @@ export async function createServer(root = process.cwd(), development = false, st
         .header('Content-Security-Policy', "default-src 'none'")
         .type(artifact.mime)
         .send(bytes);
+    },
+  );
+  server.get('/api/reports', async () => store.listReports());
+  server.get<{ Params: { id: string } }>('/api/reports/:id', async (request) =>
+    store.getReport(request.params.id),
+  );
+  server.patch<{ Params: { id: string }; Body: { title?: string } }>(
+    '/api/reports/:id',
+    async (request) => {
+      const title = request.body?.title;
+      if (typeof title !== 'string') {
+        throw new CoreError('VALIDATION', '请求体必须包含 title 字符串');
+      }
+      return store.renameReport(request.params.id, title);
+    },
+  );
+  server.delete<{ Params: { id: string } }>('/api/reports/:id', async (request) => {
+    await store.deleteReport(request.params.id);
+    return { ok: true, deleted: request.params.id };
+  });
+  server.patch<{ Params: { id: string; caseId: string }; Body: { title?: string } }>(
+    '/api/reports/:id/cases/:caseId',
+    async (request) => {
+      const title = request.body?.title;
+      if (typeof title !== 'string') {
+        throw new CoreError('VALIDATION', '请求体必须包含 title 字符串');
+      }
+      return store.updateReportCaseTitle(request.params.id, request.params.caseId, title);
+    },
+  );
+  server.delete<{ Params: { id: string; caseId: string } }>(
+    '/api/reports/:id/cases/:caseId',
+    async (request) => {
+      return store.deleteReportCase(request.params.id, request.params.caseId);
+    },
+  );
+  server.get<{ Params: { id: string; filename: string } }>(
+    '/api/reports/:id/evidence/:filename',
+    async (request, reply) => {
+      const { mime, bytes } = await store.readReportArtifact(
+        request.params.id,
+        request.params.filename,
+      );
+      return reply.header('Content-Security-Policy', "default-src 'none'").type(mime).send(bytes);
     },
   );
   // 源码构建时页面与运行器相邻；Skill 分发时页面位于 ../assets/ui。
