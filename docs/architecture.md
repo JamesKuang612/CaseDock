@@ -1,5 +1,7 @@
 # CaseDock Skill 架构
 
+> 本文定义当前生效的自包含 Skill 架构。历史 npm 包架构、迁移动机和两套方案的逐项对照见 [架构演进](architecture-evolution.md)。
+
 ## 产品定义
 
 CaseDock 是测试资产与证据协议，不是 Web Agent Harness。任意 Agent 使用自己的交互与推理能力执行测试，CaseDock 将结果保存成一致、可校验、可查看的文件结构。

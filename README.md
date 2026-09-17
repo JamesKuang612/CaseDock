@@ -93,4 +93,4 @@ node <skill-root>/scripts/casedock.mjs --root <资产目录> open
 
 `npm run check` 包含格式、类型、Core/CLI/API 测试、生产构建，以及把完整 Skill 复制到没有源码和 `node_modules` 的临时目录后进行隔离验收。`npm run test:e2e` 在本机 Chrome 中验证用例列表、执行详情和截图展示。
 
-架构边界见 [架构](docs/architecture.md)，后续计划见 [路线图](docs/roadmap.md)。
+当前架构边界见 [架构](docs/architecture.md)，npm 包与自包含 Skill 两套方案的完整演进见 [架构演进](docs/architecture-evolution.md)，后续计划见 [路线图](docs/roadmap.md)。
