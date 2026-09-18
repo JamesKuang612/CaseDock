@@ -7,6 +7,7 @@ import type {
   Artifact,
   CaseDocument,
   Run,
+  RunCheckSummary,
   RunSummary,
   SubmitTestResult,
   TestCase,
@@ -65,6 +66,27 @@ function inspectScreenshot(bytes: Buffer) {
 /** 创建一个绑定到真实工作区路径的测试资产仓库。 */
 export async function createStore(root: string) {
   return new Store(await realpath(root));
+}
+
+/** 将完整运行压缩成列表需要的检查点状态，避免传输观察内容和截图。 */
+function summarizeRunChecks(run: Run): RunCheckSummary[] {
+  const recorded = new Map(
+    run.steps.map((step) => [
+      step.stepId,
+      new Map(step.assertions.map((assertion) => [assertion.assertionId, assertion.verdict])),
+    ]),
+  );
+  return run.snapshot.steps.flatMap((step, stepIndex) =>
+    step.assertions.map((assertion, assertionIndex) => ({
+      step: stepIndex + 1,
+      assertion: assertionIndex + 1,
+      action: step.action,
+      expect: assertion.expect,
+      verdict:
+        recorded.get(step.id)?.get(assertion.id) ??
+        (run.status === 'running' ? 'running' : 'pending'),
+    })),
+  );
 }
 
 /** 为 CLI 与只读页面提供统一的数据读取、写入、版本检查和结果汇总规则。 */
@@ -312,6 +334,7 @@ export class Store {
           finishedAt,
           tokenUsage,
           executor,
+          checks: summarizeRunChecks(run),
         });
       } catch (error) {
         errors.push({

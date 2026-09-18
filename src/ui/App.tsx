@@ -3,6 +3,16 @@ import type { CaseDocument, Run, RunSummary } from '../core/models';
 import { api } from './api';
 import { RunDetails, formatDuration, formatTokenUsage, label, statusClass } from './RunDetails';
 
+type CaseListStatus = 'passed' | 'failed' | 'inconclusive' | 'running' | 'pending';
+
+/** 根据最近一次运行归类列表状态；只有从未产生运行的用例才属于未执行。 */
+function caseListStatus(latest: RunSummary | undefined): CaseListStatus {
+  if (!latest) return 'pending';
+  if (latest.status === 'running') return 'running';
+  if (latest.verdict === 'passed' || latest.verdict === 'failed') return latest.verdict;
+  return 'inconclusive';
+}
+
 /** 从地址栏读取当前用例，使列表与详情成为可前进、后退的独立视图。 */
 function caseIdFromLocation() {
   const match = window.location.hash.match(/^#\/cases\/([^/]+)$/);
@@ -18,6 +28,26 @@ function formatTime(value: string) {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+/** 将运行时间转换为本地日期输入值，保证日期筛选与页面显示使用同一时区。 */
+function dateInputValue(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+/** 判断运行时间是否落在用户选择的闭区间内。 */
+function matchesDateRange(value: string, dateFrom: string, dateTo: string) {
+  const date = dateInputValue(value);
+  return Boolean(date) && (!dateFrom || date >= dateFrom) && (!dateTo || date <= dateTo);
+}
+
+/** 清理源用例中用于分隔预期的 check 标记，仅影响列表展示。 */
+function checkDescription(action: string) {
+  return action.replace(/[；;]\s*check\s*$/i, '').trim();
 }
 
 /** 用例重命名模态弹窗，仅允许修改用例标题，唯一 Case ID 锁死不可变。 */
@@ -186,9 +216,9 @@ export function App() {
   const runId = useRef<string | null>(null);
 
   const [searchKeyword, setSearchKeyword] = useState('');
-  const [statusFilter, setStatusFilter] = useState<
-    'all' | 'passed' | 'failed' | 'running' | 'pending'
-  >('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | CaseListStatus>('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [renameTarget, setRenameTarget] = useState<CaseDocument | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CaseDocument | null>(null);
 
@@ -276,21 +306,27 @@ export function App() {
     window.location.hash = '';
   }
 
+  /** 清空关键词、状态和执行日期筛选，恢复完整用例列表。 */
+  function clearFilters() {
+    setSearchKeyword('');
+    setStatusFilter('all');
+    setDateFrom('');
+    setDateTo('');
+  }
+
   /** 计算用例各状态的统计数量。 */
   const statusCounts = useMemo(() => {
-    const counts = { all: cases.length, passed: 0, failed: 0, running: 0, pending: 0 };
+    const counts = {
+      all: cases.length,
+      passed: 0,
+      failed: 0,
+      inconclusive: 0,
+      running: 0,
+      pending: 0,
+    };
     for (const doc of cases) {
       const related = runs.filter((r) => r.caseId === doc.testCase.id);
-      const latest = related[0];
-      if (!latest) {
-        counts.pending += 1;
-      } else {
-        const s = latest.verdict ?? latest.status;
-        if (s === 'passed') counts.passed += 1;
-        else if (s === 'failed') counts.failed += 1;
-        else if (s === 'running') counts.running += 1;
-        else counts.pending += 1;
-      }
+      counts[caseListStatus(related[0])] += 1;
     }
     return counts;
   }, [cases, runs]);
@@ -300,14 +336,18 @@ export function App() {
     return cases.filter((doc) => {
       const related = runs.filter((r) => r.caseId === doc.testCase.id);
       const latest = related[0];
-      const latestStatus = latest ? (latest.verdict ?? latest.status) : 'pending';
+      const latestStatus = caseListStatus(latest);
 
-      if (statusFilter !== 'all') {
-        if (statusFilter === 'pending' && latest) return false;
-        if (statusFilter === 'passed' && latestStatus !== 'passed') return false;
-        if (statusFilter === 'failed' && latestStatus !== 'failed') return false;
-        if (statusFilter === 'running' && latestStatus !== 'running') return false;
+      if (dateFrom && dateTo && dateFrom > dateTo) return false;
+
+      if (
+        (dateFrom || dateTo) &&
+        (!latest || !matchesDateRange(latest.startedAt, dateFrom, dateTo))
+      ) {
+        return false;
       }
+
+      if (statusFilter !== 'all' && latestStatus !== statusFilter) return false;
 
       if (searchKeyword.trim()) {
         const kw = searchKeyword.trim().toLowerCase();
@@ -319,7 +359,7 @@ export function App() {
 
       return true;
     });
-  }, [cases, runs, statusFilter, searchKeyword]);
+  }, [cases, runs, statusFilter, searchKeyword, dateFrom, dateTo]);
 
   /** 处理用例重命名成功后的本地状态更新。 */
   function handleRenameSuccess(updated: CaseDocument) {
@@ -382,6 +422,46 @@ export function App() {
                 )}
               </div>
 
+              <div className="date-filter" role="group" aria-label="执行日期筛选">
+                <span className="date-filter-label">最近执行日期</span>
+                <label className="date-field">
+                  <span>从</span>
+                  <input
+                    type="date"
+                    aria-label="开始日期"
+                    value={dateFrom}
+                    onChange={(e) => setDateFrom(e.target.value)}
+                  />
+                </label>
+                <span className="date-separator" aria-hidden="true">
+                  —
+                </span>
+                <label className="date-field">
+                  <span>到</span>
+                  <input
+                    type="date"
+                    aria-label="结束日期"
+                    value={dateTo}
+                    onChange={(e) => setDateTo(e.target.value)}
+                  />
+                </label>
+                {(dateFrom || dateTo) && (
+                  <button
+                    type="button"
+                    className="date-clear-btn"
+                    onClick={() => {
+                      setDateFrom('');
+                      setDateTo('');
+                    }}
+                  >
+                    清除日期
+                  </button>
+                )}
+                {dateFrom && dateTo && dateFrom > dateTo && (
+                  <span className="date-range-error">开始日期不能晚于结束日期</span>
+                )}
+              </div>
+
               <div className="status-filter-tabs" role="tablist" aria-label="用例状态筛选">
                 <button
                   type="button"
@@ -403,6 +483,13 @@ export function App() {
                   onClick={() => setStatusFilter('failed')}
                 >
                   失败 <span>{statusCounts.failed}</span>
+                </button>
+                <button
+                  type="button"
+                  className={`filter-tab ${statusFilter === 'inconclusive' ? 'active' : ''}`}
+                  onClick={() => setStatusFilter('inconclusive')}
+                >
+                  无法判断 <span>{statusCounts.inconclusive}</span>
                 </button>
                 <button
                   type="button"
@@ -428,15 +515,8 @@ export function App() {
             ) : filteredCases.length === 0 ? (
               <div className="empty-state">
                 <span>未找到匹配的测试用例</span>
-                {(searchKeyword || statusFilter !== 'all') && (
-                  <button
-                    type="button"
-                    className="clear-filters-btn"
-                    onClick={() => {
-                      setSearchKeyword('');
-                      setStatusFilter('all');
-                    }}
-                  >
+                {(searchKeyword || statusFilter !== 'all' || dateFrom || dateTo) && (
+                  <button type="button" className="clear-filters-btn" onClick={clearFilters}>
                     重置搜索与筛选
                   </button>
                 )}
@@ -450,6 +530,17 @@ export function App() {
                     (count, step) => count + step.assertions.length,
                     0,
                   );
+                  const checks =
+                    latest?.checks ??
+                    document.testCase.steps.flatMap((step, stepIndex) =>
+                      step.assertions.map((assertion, assertionIndex) => ({
+                        step: stepIndex + 1,
+                        assertion: assertionIndex + 1,
+                        action: step.action,
+                        expect: assertion.expect,
+                        verdict: 'pending' as const,
+                      })),
+                    );
                   return (
                     <div className="case-row-wrapper" key={document.testCase.id}>
                       <button className="case-row" onClick={() => openCase(document.testCase.id)}>
@@ -462,6 +553,23 @@ export function App() {
                             {document.testCase.steps.length} 个步骤 · {assertionCount} 个检查点 ·{' '}
                             {relatedRuns.length} 次执行
                           </small>
+                          <span className="case-checks" aria-label="检查点结果">
+                            {checks.slice(0, 4).map((check) => (
+                              <span
+                                className={`check-item ${statusClass(check.verdict)}`}
+                                key={`${check.step}-${check.assertion}`}
+                                title={`${checkDescription(check.action)}\n预期：${check.expect}\n结果：${label(check.verdict)}`}
+                                aria-label={`${checkDescription(check.action)}：${label(check.verdict)}`}
+                              >
+                                <span className="check-dot" aria-hidden="true" />
+                                <span className="check-text">{checkDescription(check.action)}</span>
+                                <span className="check-verdict">{label(check.verdict)}</span>
+                              </span>
+                            ))}
+                            {checks.length > 4 && (
+                              <span className="check-more">+{checks.length - 4} 项</span>
+                            )}
+                          </span>
                         </span>
                         <span className="case-latest">
                           {latest ? (

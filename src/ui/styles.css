@@ -185,6 +185,75 @@ small {
   white-space: nowrap;
 }
 
+.case-checks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  max-width: 760px;
+}
+
+.check-item {
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 5px 8px;
+  overflow: hidden;
+  border: 1px solid #e0e6e2;
+  border-radius: 6px;
+  background: #f3f5f4;
+  color: #68766e;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.check-item.status-passed {
+  border-color: #cfe7d8;
+  background: #edf8f1;
+  color: #207047;
+}
+
+.check-item.status-failed {
+  border-color: #f0d1cf;
+  background: #fdf0ef;
+  color: #b52d28;
+}
+
+.check-item.status-running {
+  border-color: #d4e0f1;
+  background: #eff5fd;
+  color: #2863a5;
+}
+
+.check-text {
+  overflow: hidden;
+  color: #34433b;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.check-verdict {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.check-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.check-more {
+  align-self: center;
+  color: #78857d;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .case-name,
 .detail-title {
   display: flex;
@@ -590,6 +659,68 @@ small {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+.date-filter {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 34px;
+  color: #627068;
+  font-size: 13px;
+}
+
+.date-filter-label {
+  margin-right: 2px;
+  color: #435149;
+  font-weight: 600;
+}
+
+.date-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.date-field input {
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid #dbe1dc;
+  border-radius: 7px;
+  background: #fff;
+  color: #27352d;
+  font: inherit;
+  color-scheme: light;
+}
+
+.date-field input:focus {
+  outline: none;
+  border-color: #2b7357;
+  box-shadow: 0 0 0 3px rgba(43, 115, 87, 0.12);
+}
+
+.date-separator {
+  color: #a0aaa3;
+}
+
+.date-clear-btn {
+  padding: 4px 8px;
+  border: 0;
+  background: transparent;
+  color: #287553;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.date-clear-btn:hover {
+  color: #17211c;
+  text-decoration: underline;
+}
+
+.date-range-error {
+  color: #b52d28;
+  font-size: 12px;
 }
 
 .search-box {
@@ -1307,6 +1438,30 @@ small {
     grid-template-columns: minmax(0, 1fr) 14px;
     gap: 16px;
     padding: 18px;
+  }
+
+  .date-filter {
+    align-items: flex-start;
+  }
+
+  .date-filter-label {
+    width: 100%;
+  }
+
+  .date-field {
+    flex: 1 1 132px;
+  }
+
+  .date-field input {
+    width: 100%;
+  }
+
+  .date-separator {
+    display: none;
+  }
+
+  .case-checks {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .case-latest {

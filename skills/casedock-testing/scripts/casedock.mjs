@@ -55972,6 +55972,23 @@ function inspectScreenshot(bytes) {
 async function createStore(root) {
   return new Store(await realpath2(root));
 }
+function summarizeRunChecks(run) {
+  const recorded = new Map(
+    run.steps.map((step) => [
+      step.stepId,
+      new Map(step.assertions.map((assertion) => [assertion.assertionId, assertion.verdict]))
+    ])
+  );
+  return run.snapshot.steps.flatMap(
+    (step, stepIndex) => step.assertions.map((assertion, assertionIndex) => ({
+      step: stepIndex + 1,
+      assertion: assertionIndex + 1,
+      action: step.action,
+      expect: assertion.expect,
+      verdict: recorded.get(step.id)?.get(assertion.id) ?? (run.status === "running" ? "running" : "pending")
+    }))
+  );
+}
 var Store = class {
   /** 将实例绑定到工作区，不持有可过期的用例或运行内存副本。 */
   constructor(root) {
@@ -56198,7 +56215,8 @@ var Store = class {
           startedAt,
           finishedAt,
           tokenUsage,
-          executor: executor2
+          executor: executor2,
+          checks: summarizeRunChecks(run)
         });
       } catch (error) {
         errors.push({

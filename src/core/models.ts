@@ -168,6 +168,16 @@ export interface Run {
   artifacts: Artifact[];
   receipts: { requestId: string; digest: string }[];
 }
+
+/** 用于列表卡片的轻量检查点结果，不携带运行观察和截图。 */
+export interface RunCheckSummary {
+  step: number;
+  assertion: number;
+  action: string;
+  expect: string;
+  verdict: Verdict | 'running' | 'pending';
+}
+
 export type RunSummary = Pick<
   Run,
   | 'id'
@@ -179,4 +189,7 @@ export type RunSummary = Pick<
   | 'finishedAt'
   | 'tokenUsage'
   | 'executor'
->;
+> & {
+  /** 最近一次运行的检查点状态，供列表页快速展示。 */
+  checks: RunCheckSummary[];
+};

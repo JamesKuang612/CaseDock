@@ -4,7 +4,7 @@ description: 自由执行用户给出的测试，并将每条新场景的用例�
 license: MIT
 metadata:
   author: CaseDock
-  version: "1.1.0"
+  version: "1.1.1"
 ---
 
 # CaseDock 测试资产记录

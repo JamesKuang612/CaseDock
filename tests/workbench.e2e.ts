@@ -117,6 +117,58 @@ test('只读页面从用例列表进入详情并展示执行证据', async (t) =
     tokenUsage: { total: 2048, source: 'Playwright fixture' },
   });
 
+  const pendingDocument = await store.createCase({
+    schemaVersion: 1,
+    title: '尚未执行的用例',
+    tags: [],
+    preconditions: [],
+    steps: [
+      {
+        id: 'pending-step',
+        action: '等待首次执行',
+        assertions: [{ id: 'pending-assertion', expect: '首次运行完成', evidence: ['screenshot'] }],
+      },
+    ],
+  });
+  const inconclusiveDocument = await store.createCase({
+    schemaVersion: 1,
+    title: '缺少证据的已执行用例',
+    tags: [],
+    preconditions: [],
+    steps: [
+      {
+        id: 'inconclusive-step',
+        action: '执行后缺少证据',
+        assertions: [
+          {
+            id: 'inconclusive-assertion',
+            expect: '提供完整截图',
+            evidence: ['screenshot'],
+          },
+        ],
+      },
+    ],
+  });
+  const inconclusiveRun = await store.startRun({
+    caseId: inconclusiveDocument.testCase.id,
+    expectedRevision: inconclusiveDocument.revision,
+    initialUrl: 'http://127.0.0.1/incomplete',
+    credentials: null,
+    executor: {
+      agent: 'Playwright verification',
+      model: null,
+      browserTool: 'chromium',
+      capabilities: ['screenshot'],
+    },
+    preconditions: [],
+  });
+  await store.finishRun({
+    runId: inconclusiveRun.id,
+    status: 'interrupted',
+    reason: '缺少截图证据',
+    tokenUsage: null,
+  });
+
   const server = await createServer(root, false, resolve('build/ui'));
   const address = await server.listen({ host: '127.0.0.1', port: 0 });
   const browser = await chromium.launch({
@@ -138,12 +190,27 @@ test('只读页面从用例列表进入详情并展示执行证据', async (t) =
   await expect(page.getByRole('heading', { name: '测试用例' })).toBeVisible();
 
   // 1. 验证搜索与筛选功能
+  await expect(page.getByRole('button', { name: '无法判断 1' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '未执行 1' })).toBeVisible();
+  await page.getByRole('button', { name: '无法判断 1' }).click();
+  await expect(page.getByRole('button', { name: /缺少证据的已执行用例/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /尚未执行的用例/ })).toHaveCount(0);
+  await page.getByRole('button', { name: '未执行 1' }).click();
+  await expect(page.getByRole('button', { name: /尚未执行的用例/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /缺少证据的已执行用例/ })).toHaveCount(0);
+  await page.getByRole('button', { name: '全部 3' }).click();
   const searchInput = page.getByPlaceholder('搜索用例标题、ID 或标签…');
   await expect(searchInput).toBeVisible();
+  await expect(page.getByRole('group', { name: '执行日期筛选' })).toBeVisible();
+  await page.getByLabel('开始日期').fill('2099-01-01');
+  await expect(page.getByText('未找到匹配的测试用例')).toBeVisible();
+  await page.getByRole('button', { name: '重置搜索与筛选' }).click();
   await searchInput.fill('不存在的关键字_xyz');
   await expect(page.getByText('未找到匹配的测试用例')).toBeVisible();
   await page.getByRole('button', { name: '重置搜索与筛选' }).click();
   await expect(page.getByRole('button', { name: /工作台基本流程/ })).toBeVisible();
+  await expect(page.getByLabel('检查点结果').getByLabel('打开工作台：通过')).toBeVisible();
+  await expect(page.getByLabel('检查点结果').getByLabel('切换阅读视图：通过')).toBeVisible();
 
   await page.getByRole('button', { name: /工作台基本流程/ }).click();
   await expect(page).toHaveURL(
@@ -210,7 +277,10 @@ test('只读页面从用例列表进入详情并展示执行证据', async (t) =
   await page.getByRole('button', { name: '🗑 删除用例' }).click();
   await expect(page.getByRole('heading', { name: '删除测试用例' })).toBeVisible();
   await page.getByRole('button', { name: '确定删除' }).click();
-  await expect(page.getByText('暂无测试用例')).toBeVisible();
+  await expect(page.getByRole('button', { name: /工作台基本流程（重命名后）/ })).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: new RegExp(pendingDocument.testCase.title) }),
+  ).toBeVisible();
 
   assert.equal(pageErrors.length, 0, pageErrors.join('\n'));
 });
